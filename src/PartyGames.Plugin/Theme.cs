@@ -10,13 +10,13 @@ namespace PartyGames;
 internal static class Theme
 {
     // 主色
-    public static readonly Vector4 Gold = new(0.62f, 0.42f, 0.10f, 1.00f);
-    public static readonly Vector4 GoldDim = new(0.48f, 0.38f, 0.20f, 1.00f);
-    public static readonly Vector4 Text = new(0.13f, 0.15f, 0.19f, 1.00f);
-    public static readonly Vector4 Muted = new(0.38f, 0.42f, 0.48f, 1.00f);
-    public static readonly Vector4 Good = new(0.10f, 0.48f, 0.24f, 1.00f);
-    public static readonly Vector4 Warn = new(0.72f, 0.36f, 0.06f, 1.00f);
-    public static readonly Vector4 Bad = new(0.70f, 0.16f, 0.16f, 1.00f);
+    public static readonly Vector4 Gold = new(0.89f, 0.76f, 0.45f, 1.00f);
+    public static readonly Vector4 GoldDim = new(0.62f, 0.53f, 0.33f, 1.00f);
+    public static readonly Vector4 Text = new(0.91f, 0.87f, 0.80f, 1.00f);
+    public static readonly Vector4 Muted = new(0.62f, 0.58f, 0.52f, 1.00f);
+    public static readonly Vector4 Good = new(0.55f, 0.82f, 0.60f, 1.00f);
+    public static readonly Vector4 Warn = new(0.92f, 0.62f, 0.45f, 1.00f);
+    public static readonly Vector4 Bad = new(0.88f, 0.48f, 0.48f, 1.00f);
 
     /// <summary>窗口顶部：插件名 + 一行状态点。</summary>
     public static void Header(string subtitle, bool online)

@@ -123,9 +123,11 @@ internal sealed class Artwork : IDisposable
     /// <summary>在窗口客户区铺满背景图，按 dim 压暗。</summary>
     public void DrawBackground(int dimPercent)
     {
-        // 浅色纯色背景，配深色文字
-        DrawSolid();
-        return;
+        if (background is null)
+        {
+            DrawGradient();
+            return;
+        }
         try
         {
             var wrap = background.GetWrapOrDefault();
