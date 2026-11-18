@@ -68,9 +68,13 @@ internal sealed class Artwork : IDisposable
             if (string.IsNullOrWhiteSpace(path) && label == "背景")
             {
                 var bundled = System.IO.Path.Combine(BaseDir, "assets", "default-bg.png");
+                if (!System.IO.File.Exists(bundled))
+                {
+                    log.Warning("[PartyGames] 内置背景不存在: " + bundled);
+                }
                 if (System.IO.File.Exists(bundled))
                 {
-                    log.Information("[PartyGames] 使用内置默认背景");
+                    log.Information("[PartyGames] 使用内置默认背景: " + bundled);
                     return textures.GetFromFile(bundled);
                 }
             }
@@ -170,6 +174,9 @@ internal sealed class Artwork : IDisposable
             var top = ImGui.GetColorU32(new Vector4(0.72f, 0.82f, 0.93f, 1f));
             var bottom = ImGui.GetColorU32(new Vector4(0.90f, 0.94f, 0.98f, 1f));
             draw.AddRectFilledMultiColor(pos, new Vector2(pos.X + size.X, pos.Y + size.Y), top, top, bottom, bottom);
+
+            // 蒙版：把浅色渐变压暗，浅色文字才看得清
+            draw.AddRectFilled(pos, new Vector2(pos.X + size.X, pos.Y + size.Y), ImGui.GetColorU32(new Vector4(0.07f, 0.07f, 0.09f, 0.82f)));
         }
         catch
         {
