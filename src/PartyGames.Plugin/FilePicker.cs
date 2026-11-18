@@ -17,6 +17,9 @@ internal static class FilePicker
     private static string? pendingResult;
     private static int busy;
 
+    /// <summary>诊断输出（由插件设为写日志）。</summary>
+    public static Action<string>? Diag;
+
     public static bool IsBusy => Volatile.Read(ref busy) == 1;
 
     /// <summary>打开对话框；选完后调用 Poll 取结果。</summary>
@@ -24,6 +27,7 @@ internal static class FilePicker
     {
         if (Interlocked.CompareExchange(ref busy, 1, 0) != 0) return;
 
+        Diag?.Invoke("[PartyGames] BeginPick: " + title);
         var thread = new Thread(() =>
         {
             try
@@ -76,16 +80,17 @@ internal static class FilePicker
             Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER,
         };
 
-        try
-        {
-            ofn.hwndOwner = Process.GetCurrentProcess().MainWindowHandle;
-        }
-        catch
-        {
-            ofn.hwndOwner = IntPtr.Zero;
-        }
+        ofn.hwndOwner = IntPtr.Zero;
 
-        if (!GetOpenFileNameW(ref ofn)) return null;
+        Diag?.Invoke("[PartyGames] 打开文件对话框…");
+        var ok = GetOpenFileNameW(ref ofn);
+        if (!ok)
+        {
+            var err = CommDlgExtendedError();
+            Diag?.Invoke($"[PartyGames] 对话框返回 false，错误码 0x{err:X}（0 表示用户取消）");
+            return null;
+        }
+        Diag?.Invoke("[PartyGames] 已选择文件");
 
         var raw = ofn.lpstrFile ?? string.Empty;
         var end = raw.IndexOf('\0');
@@ -123,4 +128,7 @@ internal static class FilePicker
 
     [DllImport("comdlg32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool GetOpenFileNameW(ref OPENFILENAME lpofn);
+
+    [DllImport("comdlg32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint CommDlgExtendedError();
 }

@@ -29,6 +29,8 @@ public sealed class Plugin : IDalamudPlugin
         CharacterName = playerState.CharacterName;
 
 
+        FilePicker.Diag = (m) => log.Information(m);
+
         Configuration = pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         Configuration.Initialize(pluginInterface);
 
