@@ -553,7 +553,7 @@ public sealed class MainWindow : Window
                 case "chat":
                     // QQ 风格气泡：头像 + 昵称 + 圆角气泡
                     var who = roomEvent.Actor ?? "?";
-                    var isSelf = !string.IsNullOrEmpty(client.PlayerName) && who == client.PlayerName;
+                    var isSelf = !string.IsNullOrEmpty(client.PlayerName) && string.Equals(who, client.PlayerName, StringComparison.OrdinalIgnoreCase);
                     ChatBubble.Draw(who, roomEvent.Text, isSelf, isSelf, artwork);
                     break;
                 default:

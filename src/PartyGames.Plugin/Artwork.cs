@@ -47,7 +47,16 @@ internal sealed class Artwork : IDisposable
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path)) return null;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                log.Information($"[PartyGames] {label}路径为空，使用默认样式");
+                return null;
+            }
+            if (!System.IO.File.Exists(path))
+            {
+                log.Warning($"[PartyGames] {label}文件不存在: {path}");
+                return null;
+            }
             var tex = textures.GetFromFile(path);
             log.Information($"[PartyGames] 已加载{label}: {path}");
             return tex;
