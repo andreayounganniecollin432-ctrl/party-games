@@ -26,7 +26,7 @@ public sealed class MainWindow : Window
     private int maxPlayers;
     private string lastAnnounce = string.Empty;
     private bool lastHadActions;
-    private string pickFor = string.Empty;
+    private List<string> images = new();
     private int lastLogCount;
     private string avatarPath = string.Empty;
     private string backgroundPath = string.Empty;
@@ -132,41 +132,47 @@ public sealed class MainWindow : Window
 
         Theme.Section("外观（本地图片，可留空）");
 
-        // 选图：点按钮开系统对话框，选完自动填入路径
-        if (ImGui.Button("选择背景图…", new Vector2(130, 0)))
+        // 图片库：扫描插件目录下的 images\ ，用下拉框选，不用任何系统对话框
+        if (ImGui.Button("打开图片文件夹", new Vector2(130, 0)))
         {
-            FilePicker.BeginPick("选择背景图");
-            pickFor = "bg";
+            ImageLibrary.OpenFolder();
         }
         ImGui.SameLine();
-        Theme.Label(string.IsNullOrEmpty(backgroundPath) ? "（未选择，使用默认）" : System.IO.Path.GetFileName(backgroundPath));
-
-        if (ImGui.Button("选择头像图…", new Vector2(130, 0)))
+        if (ImGui.Button("刷新", new Vector2(60, 0)))
         {
-            FilePicker.BeginPick("选择头像");
-            pickFor = "avatar";
+            images = ImageLibrary.Scan();
         }
         ImGui.SameLine();
-        Theme.Label(string.IsNullOrEmpty(avatarPath) ? "（未选择，用名字首字）" : System.IO.Path.GetFileName(avatarPath));
+        Theme.Label("把图片丢进 images 文件夹即可");
 
-        // 对话框选完后取回结果
-        var picked = FilePicker.Poll();
-        if (!string.IsNullOrEmpty(picked))
+        if (images.Count == 0) images = ImageLibrary.Scan();
+
+        var bgOptions = new List<string> { "（默认背景）" };
+        bgOptions.AddRange(images);
+        var bgIndex = string.IsNullOrEmpty(backgroundPath) ? 0 : bgOptions.IndexOf(System.IO.Path.GetFileName(backgroundPath));
+        if (bgIndex < 0) bgIndex = 0;
+
+        ImGui.SetNextItemWidth(430);
+        if (ImGui.Combo("背景", ref bgIndex, bgOptions.ToArray(), bgOptions.Count))
         {
-            if (pickFor == "bg")
-            {
-                backgroundPath = picked;
-                plugin.Configuration.BackgroundPath = picked;
-            }
-            else
-            {
-                avatarPath = picked;
-                plugin.Configuration.AvatarPath = picked;
-            }
-
+            backgroundPath = bgIndex == 0 ? string.Empty : ImageLibrary.PathOf(bgOptions[bgIndex]);
+            plugin.Configuration.BackgroundPath = backgroundPath;
             plugin.Configuration.Save();
             artwork.Invalidate();
-            pickFor = string.Empty;
+        }
+
+        var avOptions = new List<string> { "（用名字首字）" };
+        avOptions.AddRange(images);
+        var avIndex = string.IsNullOrEmpty(avatarPath) ? 0 : avOptions.IndexOf(System.IO.Path.GetFileName(avatarPath));
+        if (avIndex < 0) avIndex = 0;
+
+        ImGui.SetNextItemWidth(430);
+        if (ImGui.Combo("头像", ref avIndex, avOptions.ToArray(), avOptions.Count))
+        {
+            avatarPath = avIndex == 0 ? string.Empty : ImageLibrary.PathOf(avOptions[avIndex]);
+            plugin.Configuration.AvatarPath = avatarPath;
+            plugin.Configuration.Save();
+            artwork.Invalidate();
         }
 
         var dim = plugin.Configuration.BackgroundDim;
