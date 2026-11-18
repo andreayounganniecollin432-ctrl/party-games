@@ -123,11 +123,9 @@ internal sealed class Artwork : IDisposable
     /// <summary>在窗口客户区铺满背景图，按 dim 压暗。</summary>
     public void DrawBackground(int dimPercent)
     {
-        if (background is null)
-        {
-            DrawGradient();
-            return;
-        }
+        // 浅色纯色背景，配深色文字
+        DrawSolid();
+        return;
         try
         {
             var wrap = background.GetWrapOrDefault();
@@ -178,6 +176,24 @@ internal sealed class Artwork : IDisposable
         catch
         {
             /* 画不出来就算了 */
+        }
+    }
+
+    /// <summary>浅色纯色底。</summary>
+    private static void DrawSolid()
+    {
+        try
+        {
+            var draw = ImGui.GetWindowDrawList();
+            var pos = ImGui.GetWindowPos();
+            var size = ImGui.GetWindowSize();
+            if (size.X < 8 || size.Y < 8) return;
+            draw.AddRectFilled(pos, new Vector2(pos.X + size.X, pos.Y + size.Y),
+                ImGui.GetColorU32(new Vector4(0.93f, 0.96f, 0.99f, 1f)));
+        }
+        catch
+        {
+            /* ignore */
         }
     }
 
