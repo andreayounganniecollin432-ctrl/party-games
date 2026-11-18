@@ -54,7 +54,7 @@ public sealed class MainWindow : Window
         var client = plugin.Client;
 
         // 外观：先把图片同步到配置里的路径，再铺背景
-        artwork.Sync(backgroundPath, avatarPath);
+        artwork.Sync(string.Empty, avatarPath);
         artwork.DrawBackground(plugin.Configuration.BackgroundDim);
 
         if (!client.IsConnected)
@@ -147,19 +147,6 @@ public sealed class MainWindow : Window
 
         if (images.Count == 0) images = ImageLibrary.Scan();
 
-        var bgOptions = new List<string> { "（默认背景）" };
-        bgOptions.AddRange(images);
-        var bgIndex = string.IsNullOrEmpty(backgroundPath) ? 0 : bgOptions.IndexOf(System.IO.Path.GetFileName(backgroundPath));
-        if (bgIndex < 0) bgIndex = 0;
-
-        ImGui.SetNextItemWidth(430);
-        if (ImGui.Combo("背景", ref bgIndex, bgOptions.ToArray(), bgOptions.Count))
-        {
-            backgroundPath = bgIndex == 0 ? string.Empty : ImageLibrary.PathOf(bgOptions[bgIndex]);
-            plugin.Configuration.BackgroundPath = backgroundPath;
-            plugin.Configuration.Save();
-            artwork.Invalidate();
-        }
 
         var avOptions = new List<string> { "（用名字首字）" };
         avOptions.AddRange(images);
