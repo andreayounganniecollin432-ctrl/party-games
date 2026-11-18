@@ -25,6 +25,7 @@ public sealed class MainWindow : Window
     private string actionInput = string.Empty;
     private int maxPlayers;
     private string lastAnnounce = string.Empty;
+    private bool lastHadActions;
 
     public MainWindow(Plugin plugin)
         : base("Party Games###PartyGamesMainWindow")
@@ -66,10 +67,8 @@ public sealed class MainWindow : Window
 
     private void DrawConnect(GameClient client)
     {
-        TextWrapped("跨服文字游戏：建一个房间，把房间码发给朋友，3-20 人就能开局。");
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
+        Theme.Header("跨服文字游戏 · 未连接", false);
+        Theme.Section("连接");
 
         ImGui.SetNextItemWidth(360);
         ImGui.InputText("服务器", ref serverUrl, 200);
@@ -82,7 +81,7 @@ public sealed class MainWindow : Window
         var connecting = client.State == ClientState.Connecting;
 
         if (connecting) ImGui.BeginDisabled();
-        if (ImGui.Button(connecting ? "连接中…" : "连接", new Vector2(120, 0)))
+        if (Theme.PrimaryButton(connecting ? "连接中…" : "连接", new Vector2(120, 0)))
         {
             SaveSettings();
             _ = client.ConnectAsync(serverUrl.Trim(), displayName.Trim(),
@@ -109,25 +108,21 @@ public sealed class MainWindow : Window
         {
             TextColored(Warn, client.LastError!);
         }
+
+        ImGui.Spacing();
+        Theme.Label("把房间码发给朋友，3-20 人就能开局。");
     }
 
     // -- lobby ------------------------------------------------------------
 
     private void DrawTopBar(GameClient client)
     {
-        TextMuted($"已连接 · {client.PlayerName ?? "?"}");
+        Theme.Header($"已连接 · {client.PlayerName ?? "?"}" + (client.Room is not null ? $" · 房间 {client.Room.Code}" : ""), true);
 
-        ImGui.SameLine();
         if (ImGui.Button("断开"))
         {
             client.Disconnect();
             return;
-        }
-
-        if (client.Room is not null)
-        {
-            ImGui.SameLine();
-            TextMuted($"· 房间 {client.Room.Code}");
         }
 
         ImGui.Separator();
@@ -211,6 +206,14 @@ public sealed class MainWindow : Window
         // 局势一变就念一句：优先念结果横幅，其次念当前指示（也就是"轮到谁/该做什么"）
         try
         {
+            // 有可选动作 = 轮到你决断了，单独强调一次
+            var hasActions = view.Actions is { Count: > 0 };
+            if (hasActions && !lastHadActions && plugin.Configuration.SoundEnabled && plugin.Configuration.VoiceEnabled)
+            {
+                Sfx.Speak("轮到你", 600);
+            }
+            lastHadActions = hasActions;
+
             var key = (view.Instruction ?? string.Empty) + "|" + (view.ResultBanner ?? string.Empty);
             if (key != lastAnnounce)
             {
