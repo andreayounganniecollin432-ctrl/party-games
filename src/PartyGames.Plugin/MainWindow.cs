@@ -131,33 +131,21 @@ public sealed class MainWindow : Window
 
         Theme.Section("外观（本地图片，可留空）");
 
-        if (ImGui.Button("选择背景图…", new Vector2(130, 0)))
+        ImGui.SetNextItemWidth(430);
+        if (ImGui.InputTextWithHint("背景图", "留空使用默认背景", ref backgroundPath, 260, ImGuiInputTextFlags.EnterReturnsTrue))
         {
-            plugin.FileDialog.OpenFileDialog("选择背景图", "图片{.png,.jpg,.jpeg}", (ok, path) =>
-            {
-                if (!ok || string.IsNullOrWhiteSpace(path)) return;
-                backgroundPath = path;
-                plugin.Configuration.BackgroundPath = path;
-                plugin.Configuration.Save();
-                artwork.Invalidate();
-            });
+            plugin.Configuration.BackgroundPath = backgroundPath;
+            plugin.Configuration.Save();
+            artwork.Invalidate();
         }
-        ImGui.SameLine();
-        Theme.Label(string.IsNullOrEmpty(backgroundPath) ? "（未选择，使用默认）" : System.IO.Path.GetFileName(backgroundPath));
 
-        if (ImGui.Button("选择头像图…", new Vector2(130, 0)))
+        ImGui.SetNextItemWidth(430);
+        if (ImGui.InputTextWithHint("头像图", "留空使用名字首字", ref avatarPath, 260, ImGuiInputTextFlags.EnterReturnsTrue))
         {
-            plugin.FileDialog.OpenFileDialog("选择头像", "图片{.png,.jpg,.jpeg}", (ok, path) =>
-            {
-                if (!ok || string.IsNullOrWhiteSpace(path)) return;
-                avatarPath = path;
-                plugin.Configuration.AvatarPath = path;
-                plugin.Configuration.Save();
-                artwork.Invalidate();
-            });
+            plugin.Configuration.AvatarPath = avatarPath;
+            plugin.Configuration.Save();
+            artwork.Invalidate();
         }
-        ImGui.SameLine();
-        Theme.Label(string.IsNullOrEmpty(avatarPath) ? "（未选择，用名字首字）" : System.IO.Path.GetFileName(avatarPath));
 
         var dim = plugin.Configuration.BackgroundDim;
         ImGui.SetNextItemWidth(200);
