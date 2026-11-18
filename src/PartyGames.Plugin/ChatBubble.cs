@@ -48,21 +48,26 @@ internal static class ChatBubble
         }
         else
         {
-            var seed = string.IsNullOrEmpty(speaker) ? 0 : speaker[0] % 6;
+            // 首字头像：按名字散列取色，亮字 + 深色描边，保证任何底色都看得清
             var colors = new[]
             {
-                new Vector4(0.72f, 0.55f, 0.30f, 1f),
-                new Vector4(0.45f, 0.58f, 0.70f, 1f),
-                new Vector4(0.62f, 0.45f, 0.55f, 1f),
-                new Vector4(0.42f, 0.62f, 0.52f, 1f),
-                new Vector4(0.66f, 0.58f, 0.40f, 1f),
-                new Vector4(0.55f, 0.50f, 0.65f, 1f),
+                new Vector4(0.85f, 0.66f, 0.36f, 1f),
+                new Vector4(0.47f, 0.66f, 0.82f, 1f),
+                new Vector4(0.76f, 0.55f, 0.66f, 1f),
+                new Vector4(0.48f, 0.74f, 0.62f, 1f),
+                new Vector4(0.80f, 0.70f, 0.45f, 1f),
+                new Vector4(0.65f, 0.60f, 0.82f, 1f),
             };
-            dl.AddCircleFilled(new Vector2(avatarMin.X + AvatarSize / 2, rowTop + AvatarSize / 2), AvatarSize / 2, ImGui.GetColorU32(colors[seed]), 20);
+            var seed = string.IsNullOrEmpty(speaker) ? 0 : Math.Abs(speaker[0]) % colors.Length;
+            var center = new Vector2(avatarMin.X + AvatarSize / 2, rowTop + AvatarSize / 2);
+            dl.AddCircleFilled(center, AvatarSize / 2, ImGui.GetColorU32(colors[seed]), 24);
+            dl.AddCircle(center, AvatarSize / 2, ImGui.GetColorU32(new Vector4(0.10f, 0.09f, 0.07f, 0.9f)), 24, 1.5f);
+
             var initial = string.IsNullOrEmpty(speaker) ? "?" : speaker[..1];
-            var ts = ImGui.CalcTextSize(initial);
-            dl.AddText(new Vector2(avatarMin.X + (AvatarSize - ts.X) / 2, rowTop + (AvatarSize - ts.Y) / 2),
-                ImGui.GetColorU32(new Vector4(0.10f, 0.09f, 0.07f, 1f)), initial);
+            var textSize = ImGui.CalcTextSize(initial);
+            var pos = new Vector2(center.X - textSize.X / 2, center.Y - textSize.Y / 2);
+            dl.AddText(pos + new Vector2(1, 1), ImGui.GetColorU32(new Vector4(0.08f, 0.07f, 0.06f, 1f)), initial);
+            dl.AddText(pos, ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 1f)), initial);
         }
 
         // 昵称（小字，气泡上方）
