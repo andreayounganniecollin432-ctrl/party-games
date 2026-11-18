@@ -131,19 +131,33 @@ public sealed class MainWindow : Window
 
         Theme.Section("外观（本地图片，可留空）");
 
-        ImGui.SetNextItemWidth(430);
-        if (ImGui.InputText("背景图", ref backgroundPath, 260))
+        if (ImGui.Button("选择背景图…", new Vector2(130, 0)))
         {
-            plugin.Configuration.BackgroundPath = backgroundPath;
-            plugin.Configuration.Save();
+            plugin.FileDialog.OpenFileDialog("选择背景图", "图片{.png,.jpg,.jpeg}", (ok, path) =>
+            {
+                if (!ok || string.IsNullOrWhiteSpace(path)) return;
+                backgroundPath = path;
+                plugin.Configuration.BackgroundPath = path;
+                plugin.Configuration.Save();
+                artwork.Invalidate();
+            });
         }
+        ImGui.SameLine();
+        Theme.Label(string.IsNullOrEmpty(backgroundPath) ? "（未选择，使用默认）" : System.IO.Path.GetFileName(backgroundPath));
 
-        ImGui.SetNextItemWidth(430);
-        if (ImGui.InputText("头像图", ref avatarPath, 260))
+        if (ImGui.Button("选择头像图…", new Vector2(130, 0)))
         {
-            plugin.Configuration.AvatarPath = avatarPath;
-            plugin.Configuration.Save();
+            plugin.FileDialog.OpenFileDialog("选择头像", "图片{.png,.jpg,.jpeg}", (ok, path) =>
+            {
+                if (!ok || string.IsNullOrWhiteSpace(path)) return;
+                avatarPath = path;
+                plugin.Configuration.AvatarPath = path;
+                plugin.Configuration.Save();
+                artwork.Invalidate();
+            });
         }
+        ImGui.SameLine();
+        Theme.Label(string.IsNullOrEmpty(avatarPath) ? "（未选择，用名字首字）" : System.IO.Path.GetFileName(avatarPath));
 
         var dim = plugin.Configuration.BackgroundDim;
         ImGui.SetNextItemWidth(200);
@@ -153,7 +167,7 @@ public sealed class MainWindow : Window
             plugin.Configuration.Save();
         }
 
-        Theme.Label("填完整路径，例如 D:\\pics\\bg.jpg；改完关闭窗口再打开生效。");
+        Theme.Label("图片只保存在你本地，不会上传。");
     }
 
     // -- lobby ------------------------------------------------------------

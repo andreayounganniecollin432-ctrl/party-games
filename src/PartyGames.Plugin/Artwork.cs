@@ -155,6 +155,14 @@ internal sealed class Artwork : IDisposable
         }
     }
 
+    /// <summary>路径变了：清掉缓存，下一帧重新加载。</summary>
+    public void Invalidate()
+    {
+        backgroundPath = string.Empty;
+        avatarPath = string.Empty;
+        nextTry = DateTime.MinValue;
+    }
+
     public void Dispose()
     {
         background = null;

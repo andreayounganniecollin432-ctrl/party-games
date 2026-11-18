@@ -1,6 +1,7 @@
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
+using Dalamud.Interface.ImGuiFileDialog;
 using Dalamud.Plugin.Services;
 
 namespace PartyGames;
@@ -19,13 +20,15 @@ public sealed class Plugin : IDalamudPlugin
         ICommandManager commandManager,
         IPluginLog log,
         IPlayerState playerState,
-        ITextureProvider textureProvider)
+        ITextureProvider textureProvider,
+        FileDialogManager fileDialog)
     {
         this.pluginInterface = pluginInterface;
         this.commandManager = commandManager;
 
         Log = log;
         Textures = textureProvider;
+        FileDialog = fileDialog;
         CharacterName = playerState.CharacterName;
 
         Configuration = pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
@@ -65,6 +68,9 @@ public sealed class Plugin : IDalamudPlugin
     /// <summary>加载玩家头像/背景图片用。</summary>
     public ITextureProvider Textures { get; }
 
+    /// <summary>选图对话框。</summary>
+    public FileDialogManager FileDialog { get; }
+
     private void OnDraw()
     {
         // Drain network frames on the UI thread before drawing anything.
@@ -77,6 +83,7 @@ public sealed class Plugin : IDalamudPlugin
             Configuration.Save();
         }
 
+        FileDialog.Draw();
         windowSystem.Draw();
     }
 
