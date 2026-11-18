@@ -1,0 +1,39 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v10.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v10.0": {
+      "PartyGames/0.1.0.0": {
+        "dependencies": {
+          "PartyGames.Protocol": "1.0.0"
+        },
+        "runtime": {
+          "PartyGames.dll": {}
+        }
+      },
+      "PartyGames.Protocol/1.0.0": {
+        "runtime": {
+          "PartyGames.Protocol.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "PartyGames/0.1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "PartyGames.Protocol/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}
