@@ -1,0 +1,39 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Download Dalamud
+        run: |
+          Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile dalamud.zip
+          Expand-Archive dalamud.zip -DestinationPath dalamud
+
+      - name: Build
+        env:
+          DALAMUD_HOME: ${{ github.workspace }}\dalamud
+        run: dotnet build src/PartyGames.Plugin/PartyGames.Plugin.csproj -c Release
+
+      - name: Package
+        run: |
+          New-Item -ItemType Directory -Path out -Force
+          Copy-Item src/PartyGames.Plugin/bin/Release/PartyGames.dll out/
+          Copy-Item src/PartyGames.Plugin/PartyGames.json out/
+          Compress-Archive -Path out/* -DestinationPath PartyGames.zip -Force
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: PartyGames.zip

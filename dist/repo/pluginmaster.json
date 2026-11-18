@@ -1,0 +1,21 @@
+[
+  {
+    "Author": "Coral",
+    "Name": "Party Games",
+    "Punchline": "在艾欧泽亚开一局文字游戏。",
+    "Description": "跨服多人文字游戏平台。房主建房并分享房间码，3-20 人即可开局。支持谁是卧底、狼人杀、俄罗斯轮盘、堆雪球、词语接龙、海龟汤。",
+    "InternalName": "PartyGames",
+    "AssemblyVersion": "0.1.0.0",
+    "TestingAssemblyVersion": "0.1.0.0",
+    "RepoUrl": "https://github.com/Andreayounganniecollin432-ctrl/party-games",
+    "ApplicableVersion": "any",
+    "Tags": ["social", "game", "party"],
+    "DalamudApiLevel": 15,
+    "IsHide": false,
+    "IsTestingExclusive": false,
+    "DownloadLinkInstall": "https://github.com/Andreayounganniecollin432-ctrl/party-games/releases/latest/download/PartyGames.zip",
+    "DownloadLinkUpdate": "https://github.com/Andreayounganniecollin432-ctrl/party-games/releases/latest/download/PartyGames.zip",
+    "DownloadLinkTesting": "https://github.com/Andreayounganniecollin432-ctrl/party-games/releases/latest/download/PartyGames.zip",
+    "LastUpdate": 0
+  }
+]

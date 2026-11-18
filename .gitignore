@@ -1,0 +1,19 @@
+bin/
+obj/
+_dl/
+.dalamud-libs/
+*.user
+.vs/
+.idea/
+packages.lock.json
+# 已发布的 Linux 服务端（106MB，发布产物不进仓库）
+dist/server-linux/
+dist/server-linux.tar.gz
+
+# 插件打包产物（由 GitHub Action 生成）
+dist/PartyGames/
+dist/PartyGames-新/
+dist/PartyGames-插件-*.zip
+
+# 日志
+*.log

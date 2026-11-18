@@ -1,0 +1,15 @@
+﻿PartyGames 服务器地址
+更新时间：2026-11-17 20:20
+
+给朋友（外网）：
+  wss://hugo-emperor-tommy-indiana.trycloudflare.com/ws
+
+家里同一局域网（延迟更低）：
+  ws://192.168.31.193:5180/ws
+
+网页版游戏 / 看板：
+  https://hugo-emperor-tommy-indiana.trycloudflare.com/
+  https://hugo-emperor-tommy-indiana.trycloudflare.com/status
+  https://hugo-emperor-tommy-indiana.trycloudflare.com/punishments
+
+注意：隧道每次重启地址都会变，以本文件或 start-tunnel.bat 窗口为准。

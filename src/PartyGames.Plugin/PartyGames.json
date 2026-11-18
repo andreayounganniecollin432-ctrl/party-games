@@ -1,0 +1,19 @@
+{
+  "Author": "Coral",
+  "Name": "Party Games",
+  "Punchline": "在艾欧泽亚开一局文字游戏。",
+  "Description": "跨服多人文字游戏平台。房主建房并分享房间码，3-20 人即可开局。",
+  "InternalName": "PartyGames",
+  "ApplicableVersion": "any",
+  "Tags": [
+    "social",
+    "game",
+    "party"
+  ],
+  "CategoryTags": [
+    "other"
+  ],
+  "LoadRequiredState": 0,
+  "LoadPriority": 0,
+  "CanUnloadAsync": false
+}
