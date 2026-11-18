@@ -13,9 +13,9 @@
     "DalamudApiLevel": 15,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "DownloadLinkInstall": "https://cdn.jsdelivr.net/gh/Andreayounganniecollin432-ctrl/party-games@main/dist/prebuilt/PartyGames.zip",
-    "DownloadLinkUpdate": "https://cdn.jsdelivr.net/gh/Andreayounganniecollin432-ctrl/party-games@main/dist/prebuilt/PartyGames.zip",
-    "DownloadLinkTesting": "https://cdn.jsdelivr.net/gh/Andreayounganniecollin432-ctrl/party-games@main/dist/prebuilt/PartyGames.zip",
+    "DownloadLinkInstall": "https://Andreayounganniecollin432-ctrl.github.io/party-games/PartyGames.zip",
+    "DownloadLinkUpdate": "https://Andreayounganniecollin432-ctrl.github.io/party-games/PartyGames.zip",
+    "DownloadLinkTesting": "https://Andreayounganniecollin432-ctrl.github.io/party-games/PartyGames.zip",
     "LastUpdate": 0
   }
 ]
