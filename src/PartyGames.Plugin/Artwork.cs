@@ -99,11 +99,20 @@ internal sealed class Artwork : IDisposable
     /// <summary>在窗口客户区铺满背景图，按 dim 压暗。</summary>
     public void DrawBackground(int dimPercent)
     {
-        if (background is null) return;
+        if (background is null)
+        {
+            DrawGradient();
+            return;
+        }
         try
         {
             var wrap = background.GetWrapOrDefault();
-            if (wrap is null) return;
+            if (wrap is null)
+            {
+                log.Warning("[PartyGames] 背景贴图尚未就绪，使用渐变兜底");
+                DrawGradient();
+                return;
+            }
 
             var draw = ImGui.GetWindowDrawList();
             var pos = ImGui.GetWindowPos();
@@ -145,6 +154,26 @@ internal sealed class Artwork : IDisposable
         catch
         {
             /* 画不出来就算了 */
+        }
+    }
+
+    /// <summary>没有背景图时画蓝白渐变，保证不会是一片黑。</summary>
+    private static void DrawGradient()
+    {
+        try
+        {
+            var draw = ImGui.GetWindowDrawList();
+            var pos = ImGui.GetWindowPos();
+            var size = ImGui.GetWindowSize();
+            if (size.X < 8 || size.Y < 8) return;
+
+            var top = ImGui.GetColorU32(new Vector4(0.72f, 0.82f, 0.93f, 1f));
+            var bottom = ImGui.GetColorU32(new Vector4(0.90f, 0.94f, 0.98f, 1f));
+            draw.AddRectFilledMultiColor(pos, new Vector2(pos.X + size.X, pos.Y + size.Y), top, top, bottom, bottom);
+        }
+        catch
+        {
+            /* ignore */
         }
     }
 
