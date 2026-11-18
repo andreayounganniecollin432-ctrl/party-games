@@ -108,9 +108,39 @@ internal sealed class Artwork : IDisposable
             var draw = ImGui.GetWindowDrawList();
             var pos = ImGui.GetWindowPos();
             var size = ImGui.GetWindowSize();
+            if (size.X < 8 || size.Y < 8) return;
+
+            // 等比铺满（cover）：按窗口与图片的宽高比裁切 UV，绝不拉伸变形
+            var tex = wrap.Size;
+            var texW = tex.X <= 0 ? size.X : tex.X;
+            var texH = tex.Y <= 0 ? size.Y : tex.Y;
+
+            var winAspect = size.X / size.Y;
+            var imgAspect = texW / texH;
+
+            var uv0 = Vector2.Zero;
+            var uv1 = Vector2.One;
+
+            if (imgAspect > winAspect)
+            {
+                // 图更宽：左右裁
+                var keep = winAspect / imgAspect;
+                var half = (1f - keep) / 2f;
+                uv0.X = half;
+                uv1.X = 1f - half;
+            }
+            else if (imgAspect < winAspect)
+            {
+                // 图更高：上下裁
+                var keep = imgAspect / winAspect;
+                var half = (1f - keep) / 2f;
+                uv0.Y = half;
+                uv1.Y = 1f - half;
+            }
+
             var dim = Math.Clamp(dimPercent, 0, 100) / 100f;
             var tint = ImGui.GetColorU32(new Vector4(dim, dim, dim, 1.0f));
-            draw.AddImage(wrap.Handle, pos, new Vector2(pos.X + size.X, pos.Y + size.Y), Vector2.Zero, Vector2.One, tint);
+            draw.AddImage(wrap.Handle, pos, new Vector2(pos.X + size.X, pos.Y + size.Y), uv0, uv1, tint);
         }
         catch
         {
