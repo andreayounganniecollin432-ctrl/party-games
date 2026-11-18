@@ -26,6 +26,7 @@ public sealed class MainWindow : Window
     private int maxPlayers;
     private string lastAnnounce = string.Empty;
     private bool lastHadActions;
+    private string pickFor = string.Empty;
     private int lastLogCount;
     private string avatarPath = string.Empty;
     private string backgroundPath = string.Empty;
@@ -131,20 +132,41 @@ public sealed class MainWindow : Window
 
         Theme.Section("外观（本地图片，可留空）");
 
-        ImGui.SetNextItemWidth(430);
-        if (ImGui.InputTextWithHint("背景图", "留空使用默认背景", ref backgroundPath, 260, ImGuiInputTextFlags.EnterReturnsTrue))
+        // 选图：点按钮开系统对话框，选完自动填入路径
+        if (ImGui.Button("选择背景图…", new Vector2(130, 0)))
         {
-            plugin.Configuration.BackgroundPath = backgroundPath;
-            plugin.Configuration.Save();
-            artwork.Invalidate();
+            FilePicker.BeginPick("选择背景图");
+            pickFor = "bg";
         }
+        ImGui.SameLine();
+        Theme.Label(string.IsNullOrEmpty(backgroundPath) ? "（未选择，使用默认）" : System.IO.Path.GetFileName(backgroundPath));
 
-        ImGui.SetNextItemWidth(430);
-        if (ImGui.InputTextWithHint("头像图", "留空使用名字首字", ref avatarPath, 260, ImGuiInputTextFlags.EnterReturnsTrue))
+        if (ImGui.Button("选择头像图…", new Vector2(130, 0)))
         {
-            plugin.Configuration.AvatarPath = avatarPath;
+            FilePicker.BeginPick("选择头像");
+            pickFor = "avatar";
+        }
+        ImGui.SameLine();
+        Theme.Label(string.IsNullOrEmpty(avatarPath) ? "（未选择，用名字首字）" : System.IO.Path.GetFileName(avatarPath));
+
+        // 对话框选完后取回结果
+        var picked = FilePicker.Poll();
+        if (!string.IsNullOrEmpty(picked))
+        {
+            if (pickFor == "bg")
+            {
+                backgroundPath = picked;
+                plugin.Configuration.BackgroundPath = picked;
+            }
+            else
+            {
+                avatarPath = picked;
+                plugin.Configuration.AvatarPath = picked;
+            }
+
             plugin.Configuration.Save();
             artwork.Invalidate();
+            pickFor = string.Empty;
         }
 
         var dim = plugin.Configuration.BackgroundDim;
