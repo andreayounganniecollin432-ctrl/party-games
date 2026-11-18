@@ -55,6 +55,17 @@ public sealed class MainWindow : Window
 
         // 外观：先把图片同步到配置里的路径，再铺背景
         artwork.Sync(string.Empty, avatarPath);
+
+        // 版本水印：用于确认跑的是哪个 build
+        try
+        {
+            var dl = ImGui.GetForegroundDrawList();
+            var wp = ImGui.GetWindowPos();
+            var ws = ImGui.GetWindowSize();
+            dl.AddText(new Vector2(wp.X + ws.X - 78, wp.Y + 4),
+                ImGui.GetColorU32(new Vector4(0.85f, 0.75f, 0.45f, 0.9f)), "v0.3.1");
+        }
+        catch { }
         artwork.DrawBackground(plugin.Configuration.BackgroundDim);
 
         if (!client.IsConnected)
