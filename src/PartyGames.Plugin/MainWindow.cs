@@ -26,6 +26,7 @@ public sealed class MainWindow : Window
     private int maxPlayers;
     private string lastAnnounce = string.Empty;
     private bool lastHadActions;
+    private int lastLogCount;
     private string avatarPath = string.Empty;
     private string backgroundPath = string.Empty;
     private readonly Artwork artwork;
@@ -525,14 +526,17 @@ public sealed class MainWindow : Window
         actionInput = string.Empty;
     }
 
-    private static void DrawLog(GameClient client)
+    private void DrawLog(GameClient client)
     {
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.BeginChild("##log", new Vector2(0, 176), true, ImGuiWindowFlags.None);
 
-        // 只有本来就在底部时才自动跟随新内容；用户往上翻的时候不要把他拽回来。
-        var stickToBottom = ImGui.GetScrollY() >= ImGui.GetScrollMaxY() - 2f;
+        // 只有「来了新消息」且「本来就在底部」时才跟着滚。
+        // 之前是每帧都判断当前是否在底部——用户拖动的一瞬间读数还是旧的，
+        // 于是每帧都把他拽回底部，表现为滚不动、一拖就弹回去。
+        var count = client.Events.Count;
+        var atBottom = ImGui.GetScrollY() >= ImGui.GetScrollMaxY() - 2f;
 
         foreach (var roomEvent in client.Events)
         {
@@ -555,7 +559,8 @@ public sealed class MainWindow : Window
             }
         }
 
-        if (stickToBottom) ImGui.SetScrollHereY(1f);
+        if (count != lastLogCount && atBottom) ImGui.SetScrollHereY(1f);
+        lastLogCount = count;
 
         ImGui.EndChild();
     }
