@@ -67,32 +67,35 @@ internal sealed class Artwork : IDisposable
         {
             if (string.IsNullOrWhiteSpace(path) && label == "背景")
             {
-                // 优先用嵌进 DLL 的资源，完全不依赖文件路径
+                // 把内置图落到 images\ 下，然后走"手动选择"那条已验证可用的 GetFromFile 路径
                 try
                 {
-                    var asm = typeof(Artwork).Assembly;
-                    var embedded = textures.GetFromManifestResource(asm, "default-bg.png");
-                    log.Information("[PartyGames] 使用嵌入资源背景");
-                    return embedded;
-                }
-                catch (Exception ex)
-                {
-                    log.Warning("[PartyGames] 嵌入资源背景失败: " + ex.Message);
-                }
-
-                try
-                {
-                    var bundled = System.IO.Path.Combine(BaseDir, "assets", "default-bg.png");
-                    if (System.IO.File.Exists(bundled))
+                    var target = System.IO.Path.Combine(ImageLibrary.Folder, "default-bg.png");
+                    if (!System.IO.File.Exists(target))
                     {
-                        log.Information("[PartyGames] 使用文件背景: " + bundled);
-                        return textures.GetFromFile(bundled);
+                        System.IO.Directory.CreateDirectory(ImageLibrary.Folder);
+                        using var stream = typeof(Artwork).Assembly.GetManifestResourceStream("default-bg.png");
+                        if (stream is not null)
+                        {
+                            using var fs = System.IO.File.Create(target);
+                            stream.CopyTo(fs);
+                            log.Information("[PartyGames] 已释放默认背景到: " + target);
+                        }
+                        else
+                        {
+                            log.Warning("[PartyGames] 找不到嵌入资源 default-bg.png");
+                        }
                     }
-                    log.Warning("[PartyGames] 背景文件不存在: " + bundled);
+
+                    if (System.IO.File.Exists(target))
+                    {
+                        log.Information("[PartyGames] 使用默认背景: " + target);
+                        return textures.GetFromFile(target);
+                    }
                 }
                 catch (Exception ex)
                 {
-                    log.Warning("[PartyGames] 文件背景失败: " + ex.Message);
+                    log.Warning("[PartyGames] 释放/加载默认背景失败: " + ex.Message);
                 }
             }
             if (string.IsNullOrWhiteSpace(path))
