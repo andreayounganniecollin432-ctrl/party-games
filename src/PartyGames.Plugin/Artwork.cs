@@ -19,6 +19,7 @@ internal sealed class Artwork : IDisposable
     private string backgroundPath = string.Empty;
     private string avatarPath = string.Empty;
     private DateTime nextTry = DateTime.MinValue;
+    private static string _baseDir = string.Empty;
 
     public Artwork(ITextureProvider textures, IPluginLog log)
     {
@@ -43,10 +44,36 @@ internal sealed class Artwork : IDisposable
         }
     }
 
+    private static string BaseDir
+    {
+        get
+        {
+            if (_baseDir.Length == 0)
+            {
+                try
+                {
+                    var loc = typeof(Artwork).Assembly.Location;
+                    _baseDir = string.IsNullOrEmpty(loc) ? AppContext.BaseDirectory : System.IO.Path.GetDirectoryName(loc) ?? AppContext.BaseDirectory;
+                }
+                catch { _baseDir = AppContext.BaseDirectory; }
+            }
+            return _baseDir;
+        }
+    }
+
     private ISharedImmediateTexture? TryLoad(string path, string label)
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(path) && label == "背景")
+            {
+                var bundled = System.IO.Path.Combine(BaseDir, "assets", "default-bg.png");
+                if (System.IO.File.Exists(bundled))
+                {
+                    log.Information("[PartyGames] 使用内置默认背景");
+                    return textures.GetFromFile(bundled);
+                }
+            }
             if (string.IsNullOrWhiteSpace(path))
             {
                 log.Information($"[PartyGames] {label}路径为空，使用默认样式");

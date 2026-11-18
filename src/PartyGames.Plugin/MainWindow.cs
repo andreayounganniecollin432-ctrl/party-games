@@ -78,6 +78,12 @@ public sealed class MainWindow : Window
 
     private void DrawConnect(GameClient client)
     {
+        // 自定义头像（只在这两页显示）
+        if (artwork.DrawAvatar(48))
+        {
+            ImGui.SameLine();
+        }
+
         Theme.Header("跨服文字游戏 · 未连接", false);
         Theme.Section("连接");
 
@@ -154,6 +160,11 @@ public sealed class MainWindow : Window
 
     private void DrawTopBar(GameClient client)
     {
+        if (artwork.DrawAvatar(36))
+        {
+            ImGui.SameLine();
+        }
+
         Theme.Header($"已连接 · {client.PlayerName ?? "?"}" + (client.Room is not null ? $" · 房间 {client.Room.Code}" : ""), true);
 
         if (ImGui.Button("断开"))
@@ -551,10 +562,10 @@ public sealed class MainWindow : Window
                     TextMuted(text);
                     break;
                 case "chat":
-                    // QQ 风格气泡：头像 + 昵称 + 圆角气泡
+                    // 气泡统一靠左；头像只用名字首字（自定义头像留给登录/选游戏界面）
                     var who = roomEvent.Actor ?? "?";
-                    var isSelf = !string.IsNullOrEmpty(client.PlayerName) && string.Equals(who, client.PlayerName, StringComparison.OrdinalIgnoreCase);
-                    ChatBubble.Draw(who, roomEvent.Text, isSelf, isSelf, artwork);
+                    var clock = DateTimeOffset.FromUnixTimeMilliseconds(roomEvent.AtMs).ToLocalTime().ToString("HH:mm");
+                    ChatBubble.Draw(who, roomEvent.Text, clock);
                     break;
                 default:
                     ImGui.TextDisabled(text);

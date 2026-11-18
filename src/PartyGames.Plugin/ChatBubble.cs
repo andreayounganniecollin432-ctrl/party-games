@@ -20,7 +20,7 @@ internal static class ChatBubble
     private const float PadY = 6f;
 
     /// <summary>画一条聊天。返回占用高度。</summary>
-    public static float Draw(string speaker, string text, bool isSelf, bool hasAvatar, Artwork? artwork)
+    public static float Draw(string speaker, string text, string clock)
     {
         var dl = ImGui.GetWindowDrawList();
         var origin = ImGui.GetCursorScreenPos();
@@ -39,14 +39,9 @@ internal static class ChatBubble
         var rowTop = origin.Y + nameHeight;
         var rowHeight = Math.Max(AvatarSize, bubbleHeight);
 
-        // 头像
+        // 头像（统一首字）
         var avatarMin = new Vector2(origin.X, rowTop);
         var avatarMax = avatarMin + new Vector2(AvatarSize, AvatarSize);
-        if (hasAvatar && artwork is not null && artwork.DrawAvatarAt(avatarMin, AvatarSize))
-        {
-            // 已画图
-        }
-        else
         {
             // 首字头像：按名字散列取色，亮字 + 深色描边，保证任何底色都看得清
             var colors = new[]
@@ -74,14 +69,14 @@ internal static class ChatBubble
         var textX = avatarMax.X + Gap;
         if (!string.IsNullOrEmpty(speaker))
         {
-            dl.AddText(new Vector2(textX, origin.Y), ImGui.GetColorU32(isSelf ? Theme.Gold : Theme.Muted), speaker);
+            dl.AddText(new Vector2(textX, origin.Y), ImGui.GetColorU32(Theme.GoldDim), speaker + (string.IsNullOrEmpty(clock) ? "" : "  " + clock));
         }
 
         // 气泡
         var bubbleMin = new Vector2(textX, rowTop);
         var bubbleMax = new Vector2(textX + bubbleWidth, rowTop + bubbleHeight);
-        dl.AddRectFilled(bubbleMin, bubbleMax, ImGui.GetColorU32(isSelf ? SelfBubble : OtherBubble), 9f);
-        dl.AddRect(bubbleMin, bubbleMax, ImGui.GetColorU32(isSelf ? SelfBorder : OtherBorder), 9f);
+        dl.AddRectFilled(bubbleMin, bubbleMax, ImGui.GetColorU32(OtherBubble), 9f);
+        dl.AddRect(bubbleMin, bubbleMax, ImGui.GetColorU32(OtherBorder), 9f);
 
         // 文本
         var ty = rowTop + PadY;

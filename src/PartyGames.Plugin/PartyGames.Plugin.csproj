@@ -1,6 +1,6 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.1.8.0</Version>
+    <Version>0.1.9.0</Version>
     <AssemblyName>PartyGames</AssemblyName>
     <RootNamespace>PartyGames</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -12,6 +12,10 @@
 
   <!-- 珊瑚音色的语音片段，随插件一起发布 -->
   <ItemGroup>
+    <Content Include="assets\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </Content>
     <Content Include="audio\**\*.wav">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>false</Visible>
