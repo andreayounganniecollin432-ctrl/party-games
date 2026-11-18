@@ -15,6 +15,15 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>语音播报（轮到谁）</summary>
     public bool VoiceEnabled { get; set; } = true;
 
+    /// <summary>自定义头像图片路径（本地文件），留空用默认色块</summary>
+    public string AvatarPath { get; set; } = string.Empty;
+
+    /// <summary>自定义背景图片路径（本地文件），留空用默认深色</summary>
+    public string BackgroundPath { get; set; } = string.Empty;
+
+    /// <summary>背景压暗程度 0-100</summary>
+    public int BackgroundDim { get; set; } = 60;
+
     public string ServerUrl { get; set; } = "ws://111.230.152.180:5180/ws";
 
     public string DisplayName { get; set; } = string.Empty;

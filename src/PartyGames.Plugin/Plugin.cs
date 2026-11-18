@@ -18,12 +18,14 @@ public sealed class Plugin : IDalamudPlugin
         IDalamudPluginInterface pluginInterface,
         ICommandManager commandManager,
         IPluginLog log,
-        IPlayerState playerState)
+        IPlayerState playerState,
+        ITextureProvider textureProvider)
     {
         this.pluginInterface = pluginInterface;
         this.commandManager = commandManager;
 
         Log = log;
+        Textures = textureProvider;
         CharacterName = playerState.CharacterName;
 
         Configuration = pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
@@ -59,6 +61,9 @@ public sealed class Plugin : IDalamudPlugin
     public string CharacterName { get; }
 
     public IPluginLog Log { get; }
+
+    /// <summary>加载玩家头像/背景图片用。</summary>
+    public ITextureProvider Textures { get; }
 
     private void OnDraw()
     {

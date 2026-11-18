@@ -26,6 +26,9 @@ public sealed class MainWindow : Window
     private int maxPlayers;
     private string lastAnnounce = string.Empty;
     private bool lastHadActions;
+    private string avatarPath = string.Empty;
+    private string backgroundPath = string.Empty;
+    private readonly Artwork artwork;
 
     public MainWindow(Plugin plugin)
         : base("Party Games###PartyGamesMainWindow")
@@ -39,11 +42,18 @@ public sealed class MainWindow : Window
             ? plugin.CharacterName
             : plugin.Configuration.DisplayName;
         maxPlayers = plugin.Configuration.PreferredMaxPlayers;
+        avatarPath = plugin.Configuration.AvatarPath;
+        backgroundPath = plugin.Configuration.BackgroundPath;
+        artwork = new Artwork(plugin.Textures, plugin.Log);
     }
 
     public override void Draw()
     {
         var client = plugin.Client;
+
+        // 外观：先把图片同步到配置里的路径，再铺背景
+        artwork.Sync(backgroundPath, avatarPath);
+        artwork.DrawBackground(plugin.Configuration.BackgroundDim);
 
         if (!client.IsConnected)
         {
@@ -111,6 +121,32 @@ public sealed class MainWindow : Window
 
         ImGui.Spacing();
         Theme.Label("把房间码发给朋友，3-20 人就能开局。");
+
+        Theme.Section("外观（本地图片，可留空）");
+
+        ImGui.SetNextItemWidth(430);
+        if (ImGui.InputText("背景图", ref backgroundPath, 260))
+        {
+            plugin.Configuration.BackgroundPath = backgroundPath;
+            plugin.Configuration.Save();
+        }
+
+        ImGui.SetNextItemWidth(430);
+        if (ImGui.InputText("头像图", ref avatarPath, 260))
+        {
+            plugin.Configuration.AvatarPath = avatarPath;
+            plugin.Configuration.Save();
+        }
+
+        var dim = plugin.Configuration.BackgroundDim;
+        ImGui.SetNextItemWidth(200);
+        if (ImGui.SliderInt("背景压暗", ref dim, 0, 100))
+        {
+            plugin.Configuration.BackgroundDim = dim;
+            plugin.Configuration.Save();
+        }
+
+        Theme.Label("填完整路径，例如 D:\\pics\\bg.jpg；改完关闭窗口再打开生效。");
     }
 
     // -- lobby ------------------------------------------------------------
@@ -399,12 +435,27 @@ public sealed class MainWindow : Window
         }
     }
 
-    private static void DrawPlayers(GameView view)
+    private void DrawPlayers(GameView view)
     {
         ImGui.BeginChild("##players", new Vector2(0, 168), true, ImGuiWindowFlags.None);
 
         foreach (var player in view.Players)
         {
+            // 自己的头像：自定义图片 → 没有就画个首字色块（别人的头像协议里没传）
+            if (player.IsYou)
+            {
+                if (!artwork.DrawAvatar(22))
+                {
+                    var draw = ImGui.GetWindowDrawList();
+                    var at = ImGui.GetCursorScreenPos();
+                    draw.AddRectFilled(at, new Vector2(at.X + 22, at.Y + 22), ImGui.GetColorU32(new Vector4(0.62f, 0.48f, 0.25f, 1f)), 4f);
+                    var ch = string.IsNullOrEmpty(player.Name) ? "?" : player.Name[..1];
+                    draw.AddText(new Vector2(at.X + 6, at.Y + 3), ImGui.GetColorU32(new Vector4(0.12f, 0.10f, 0.08f, 1f)), ch);
+                    ImGui.Dummy(new Vector2(22, 22));
+                }
+                ImGui.SameLine();
+            }
+
             var line = player.Name + (player.IsYou ? "（你）" : string.Empty);
 
             if (!string.IsNullOrEmpty(player.Badge)) line += $"  [{player.Badge}]";
