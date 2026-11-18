@@ -67,15 +67,32 @@ internal sealed class Artwork : IDisposable
         {
             if (string.IsNullOrWhiteSpace(path) && label == "背景")
             {
-                var bundled = System.IO.Path.Combine(BaseDir, "assets", "default-bg.png");
-                if (!System.IO.File.Exists(bundled))
+                // 优先用嵌进 DLL 的资源，完全不依赖文件路径
+                try
                 {
-                    log.Warning("[PartyGames] 内置背景不存在: " + bundled);
+                    var asm = typeof(Artwork).Assembly;
+                    var embedded = textures.GetFromManifestResource(asm, "default-bg.png");
+                    log.Information("[PartyGames] 使用嵌入资源背景");
+                    return embedded;
                 }
-                if (System.IO.File.Exists(bundled))
+                catch (Exception ex)
                 {
-                    log.Information("[PartyGames] 使用内置默认背景: " + bundled);
-                    return textures.GetFromFile(bundled);
+                    log.Warning("[PartyGames] 嵌入资源背景失败: " + ex.Message);
+                }
+
+                try
+                {
+                    var bundled = System.IO.Path.Combine(BaseDir, "assets", "default-bg.png");
+                    if (System.IO.File.Exists(bundled))
+                    {
+                        log.Information("[PartyGames] 使用文件背景: " + bundled);
+                        return textures.GetFromFile(bundled);
+                    }
+                    log.Warning("[PartyGames] 背景文件不存在: " + bundled);
+                }
+                catch (Exception ex)
+                {
+                    log.Warning("[PartyGames] 文件背景失败: " + ex.Message);
                 }
             }
             if (string.IsNullOrWhiteSpace(path))
