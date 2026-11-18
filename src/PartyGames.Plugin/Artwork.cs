@@ -99,6 +99,26 @@ internal sealed class Artwork : IDisposable
         }
     }
 
+    /// <summary>在指定位置画头像（不占布局）。</summary>
+    public bool DrawAvatarAt(Vector2 pos, float size)
+    {
+        if (avatar is null) return false;
+        try
+        {
+            var wrap = avatar.GetWrapOrDefault();
+            if (wrap is null) return false;
+            var dl = ImGui.GetWindowDrawList();
+            var rounding = size / 2f;
+            dl.AddImageRounded(wrap.Handle, pos, new Vector2(pos.X + size, pos.Y + size),
+                Vector2.Zero, Vector2.One, 0xFFFFFFFFu, rounding);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public void Dispose()
     {
         background = null;

@@ -551,7 +551,10 @@ public sealed class MainWindow : Window
                     TextMuted(text);
                     break;
                 case "chat":
-                    ImGui.TextWrapped(text);
+                    // QQ 风格气泡：头像 + 昵称 + 圆角气泡
+                    var who = roomEvent.Actor ?? "?";
+                    var isSelf = !string.IsNullOrEmpty(client.PlayerName) && who == client.PlayerName;
+                    ChatBubble.Draw(who, roomEvent.Text, isSelf, isSelf, artwork);
                     break;
                 default:
                     ImGui.TextDisabled(text);
