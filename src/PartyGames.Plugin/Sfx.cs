@@ -36,6 +36,47 @@ internal static class Sfx
         }
     }
 
+    private static string _baseDir = string.Empty;
+
+    /// <summary>插件目录（DLL 所在处），语音片段放在其下的 audio\。</summary>
+    private static string BaseDir
+    {
+        get
+        {
+            if (_baseDir.Length == 0)
+            {
+                try
+                {
+                    var loc = typeof(Sfx).Assembly.Location;
+                    _baseDir = string.IsNullOrEmpty(loc)
+                        ? AppContext.BaseDirectory
+                        : System.IO.Path.GetDirectoryName(loc) ?? AppContext.BaseDirectory;
+                }
+                catch
+                {
+                    _baseDir = AppContext.BaseDirectory;
+                }
+            }
+            return _baseDir;
+        }
+    }
+
+    /// <summary>
+    /// 播放珊瑚音色的语音片段（audio\&lt;名字&gt;.wav）。
+    /// 找不到就退回系统语音念一句中文。
+    /// </summary>
+    public static void PlayClip(string name, string fallbackText = "")
+    {
+        var path = System.IO.Path.Combine(BaseDir, "audio", name + ".wav");
+        if (System.IO.File.Exists(path))
+        {
+            PlayWav(path);
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(fallbackText)) Speak(fallbackText, 400);
+    }
+
     /// <summary>用系统语音念一句话（异步）。</summary>
     public static void Speak(string text, int minGapMs = 1500)
     {

@@ -210,7 +210,7 @@ public sealed class MainWindow : Window
             var hasActions = view.Actions is { Count: > 0 };
             if (hasActions && !lastHadActions && plugin.Configuration.SoundEnabled && plugin.Configuration.VoiceEnabled)
             {
-                Sfx.Speak("轮到你", 600);
+                Sfx.PlayClip("turn-you", "轮到你啦");
             }
             lastHadActions = hasActions;
 
