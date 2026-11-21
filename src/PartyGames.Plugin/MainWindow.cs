@@ -433,25 +433,53 @@ public sealed class MainWindow : Window
             if (i > 0 && i % 9 != 0) ImGui.SameLine();
 
             var picked = pickedCards.Contains(i);
-            var isRed = tokens[i].Contains('♥') || tokens[i].Contains('♦');
-            var face = picked ? new Vector4(0.86f, 0.70f, 0.38f, 1f) : new Vector4(0.96f, 0.95f, 0.92f, 1f);
-            ImGui.PushStyleColor(ImGuiCol.Button, face);
-            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(1.0f, 0.97f, 0.88f, 1f));
-            ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(1.0f, 0.90f, 0.70f, 1f));
-            ImGui.PushStyleColor(ImGuiCol.Text, isRed
-                ? new Vector4(0.78f, 0.12f, 0.12f, 1f)
-                : new Vector4(0.10f, 0.10f, 0.12f, 1f));
+            var token = tokens[i];
+            var suit = token.Length > 0 && "♠♥♣♦".IndexOf(token[token.Length - 1]) >= 0 ? token[token.Length - 1] : '\0';
+            var rank = suit == '\0' ? token : token.Substring(0, token.Length - 1);
+            var isRed = suit == '♥' || suit == '♦';
+            if (token == "小王" || token == "大王") isRed = false;
 
-            ImGui.PushID($"card{i}");
-            if (ImGui.Button(tokens[i], new Vector2(46, 56)))
-            {
-                if (picked) pickedCards.Remove(i); else pickedCards.Add(i);
-            }
+            var size = new Vector2(48, 66);
+            var p0 = ImGui.GetCursorScreenPos();
+
+            ImGui.PushID("card" + i);
+            ImGui.InvisibleButton("face", size);
+            var hovered = ImGui.IsItemHovered();
+            var clicked = ImGui.IsItemClicked();
             ImGui.PopID();
 
-            ImGui.PopStyleColor(4);
-        }
+            var dl = ImGui.GetWindowDrawList();
+            var lift = picked ? 6f : 0f;
+            var a = new Vector2(p0.X, p0.Y - lift);
+            var b = new Vector2(p0.X + size.X, p0.Y + size.Y - lift);
 
+            dl.AddRectFilled(new Vector2(a.X + 2, a.Y + 3), new Vector2(b.X + 2, b.Y + 3),
+                ImGui.GetColorU32(new Vector4(0f, 0f, 0f, 0.35f)), 6f);
+
+            var face = picked
+                ? new Vector4(0.99f, 0.95f, 0.86f, 1f)
+                : hovered ? new Vector4(1f, 1f, 1f, 1f) : new Vector4(0.97f, 0.96f, 0.93f, 1f);
+            dl.AddRectFilled(a, b, ImGui.GetColorU32(face), 6f);
+            dl.AddRect(a, b,
+                ImGui.GetColorU32(picked ? new Vector4(0.85f, 0.65f, 0.25f, 1f) : new Vector4(0.55f, 0.52f, 0.45f, 1f)),
+                6f, 0, picked ? 2.5f : 1.2f);
+
+            var ink = isRed ? new Vector4(0.80f, 0.12f, 0.12f, 1f) : new Vector4(0.12f, 0.12f, 0.14f, 1f);
+            var inkU = ImGui.GetColorU32(ink);
+
+            dl.AddText(new Vector2(a.X + 5, a.Y + 3), inkU, rank);
+            if (suit != '\0') dl.AddText(new Vector2(a.X + 5, a.Y + 18), inkU, suit.ToString());
+
+            var bigText = suit == '\0' ? (token == "小王" ? "小" : "大") : suit.ToString();
+            var bigSize = ImGui.CalcTextSize(bigText);
+            dl.AddText(new Vector2(a.X + (size.X - bigSize.X) / 2, b.Y - bigSize.Y - 8), inkU, bigText);
+
+            if (clicked)
+            {
+                if (picked) pickedCards.Remove(i);
+                else pickedCards.Add(i);
+            }
+        }
         ImGui.Spacing();
 
         var canPlay = view.AcceptsText && pickedCards.Count > 0;
