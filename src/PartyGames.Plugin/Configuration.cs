@@ -10,6 +10,9 @@ public sealed class Configuration : IPluginConfiguration
     public int Version { get; set; } = 1;
 
     /// <summary>音效开关</summary>
+    /// <summary>把房间聊天同步到游戏聊天框（只有自己看得到）</summary>
+    public bool SyncChatToGame { get; set; } = true;
+
     public bool SoundEnabled { get; set; } = true;
 
     /// <summary>语音播报（轮到谁）</summary>

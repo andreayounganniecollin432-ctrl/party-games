@@ -1,6 +1,7 @@
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
+using Dalamud.Game.Text;
 using Dalamud.Plugin.Services;
 
 namespace PartyGames;
@@ -19,13 +20,15 @@ public sealed class Plugin : IDalamudPlugin
         ICommandManager commandManager,
         IPluginLog log,
         IPlayerState playerState,
-        ITextureProvider textureProvider)
+        ITextureProvider textureProvider,
+        IChatGui chatGui)
     {
         this.pluginInterface = pluginInterface;
         this.commandManager = commandManager;
 
         Log = log;
         Textures = textureProvider;
+        Chat = chatGui;
         CharacterName = playerState.CharacterName;
 
 
@@ -67,6 +70,9 @@ public sealed class Plugin : IDalamudPlugin
 
     /// <summary>加载玩家头像/背景图片用。</summary>
     public ITextureProvider Textures { get; }
+
+    /// <summary>游戏聊天框（Echo 频道）</summary>
+    public IChatGui Chat { get; }
 
 
     private void OnDraw()

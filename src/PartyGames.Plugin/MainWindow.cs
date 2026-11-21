@@ -1,5 +1,6 @@
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Game.Text;
 using Dalamud.Interface.Windowing;
 using PartyGames.Protocol;
 
@@ -31,6 +32,7 @@ public sealed class MainWindow : Window
     private readonly List<int> pickedCards = new();
     private string lastHandText = string.Empty;
     private int lastVoiceLogCount;
+    private int lastEchoCount;
     private int xqSelR = -1;
     private int xqSelC = -1;
     private string xqBoardKey = string.Empty;
@@ -147,6 +149,14 @@ public sealed class MainWindow : Window
         ImGui.Spacing();
         Theme.Label("把房间码发给朋友，3-20 人就能开局。");
 
+        Theme.Section("聊天");
+
+        var sync = plugin.Configuration.SyncChatToGame;
+        if (ImGui.Checkbox("同步聊天到游戏聊天框（Echo，只有自己看得到）", ref sync))
+        {
+            plugin.Configuration.SyncChatToGame = sync;
+            plugin.Configuration.Save();
+        }
         Theme.Section("外观（本地图片，可留空）");
 
         // 图片库：扫描插件目录下的 images\ ，用下拉框选，不用任何系统对话框
@@ -494,6 +504,32 @@ public sealed class MainWindow : Window
         ImGui.Spacing();
     }
 
+    /// <summary>把新收到的聊天打印到游戏聊天框（Echo 频道，只有自己看得到）。</summary>
+    private void SyncChatToGameChat(GameClient client)
+    {
+        if (client.Events.Count <= lastEchoCount) return;
+
+        for (var i = lastEchoCount; i < client.Events.Count; i++)
+        {
+            var e = client.Events[i];
+            if (e.Kind != "chat") continue;
+            var who = string.IsNullOrEmpty(e.Actor) ? "派对" : e.Actor;
+            try
+            {
+                plugin.Chat.Print(new XivChatEntry
+                {
+                    Type = XivChatType.Echo,
+                    Message = $"[派对] {who}：{e.Text}",
+                });
+            }
+            catch
+            {
+                /* 打印失败不影响界面 */
+            }
+        }
+
+        lastEchoCount = client.Events.Count;
+    }
     private static string XqPiece(char p) => p switch
     {
         'K' => "帅", 'A' => "仕", 'B' => "相", 'N' => "马", 'R' => "车", 'C' => "炮", 'P' => "兵",
