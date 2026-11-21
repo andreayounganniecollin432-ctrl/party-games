@@ -190,6 +190,26 @@ public sealed class DouDizhuGame : IGameModule
             }
         }
 
+        // 四带二：四张 + 两张单牌 或 两对
+        if (ranks.Count == 6 || ranks.Count == 8)
+        {
+            var four = groupsByRank.Where(kv => kv.Value == 4).Select(kv => kv.Key).ToList();
+            if (four.Count == 1)
+            {
+                var rest = ranks.Count - 4;
+                var restGroups = ranks.Where(r => r != four[0]).GroupBy(r => r).ToList();
+                var okSingles = rest == 2 && restGroups.Count == 2 && restGroups.All(g => g.Count() == 1);
+                var okPairs = rest == 4 && restGroups.Count == 2 && restGroups.All(g => g.Count() == 2);
+                if (okSingles || okPairs)
+                    return new Combo
+                    {
+                        Type = okSingles ? "four2" : "four2pair",
+                        Rank = four[0],
+                        Length = 1,
+                        Count = ranks.Count,
+                    };
+            }
+        }
         // 飞机：连续的三张（至少两组），可带同数量的单牌或对子
         if (groups.Count >= 2)
         {
@@ -480,6 +500,8 @@ public sealed class DouDizhuGame : IGameModule
         "triple2" => "三带二",
         "straight" => $"{c.Length} 连顺",
         "pairs" => $"{c.Length} 连对",
+        "four2" => "四带二",
+        "four2pair" => "四带两对",
         "plane" => "飞机",
         "plane1" => "飞机带单",
         "plane2" => "飞机带对",

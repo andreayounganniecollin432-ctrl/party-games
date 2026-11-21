@@ -590,7 +590,9 @@ public sealed class MainWindow : Window
         }
 
         // 点击处理
-        ImGui.InvisibleButton("##xqboard", new Vector2(w + 24, h + 24));
+        ImGui.SetCursorScreenPos(origin);
+        ImGui.SetCursorScreenPos(origin);
+        ImGui.InvisibleButton("##xqboard", new Vector2(w + cell * 0.6f, h + cell * 0.6f));
         var clicked = ImGui.IsItemClicked();
         var mouse = ImGui.GetMousePos();
 
