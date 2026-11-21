@@ -392,6 +392,7 @@ public sealed class MainWindow : Window
 
         ImGui.Spacing();
 
+        if (snapshot.GameId == "doudizhu") { 
         // 右侧：出牌记录（图形）
         var y0 = ImGui.GetCursorPosY();
         var sideW = 250f;
@@ -416,6 +417,7 @@ public sealed class MainWindow : Window
 
         ImGui.EndChild();
         ImGui.SetCursorPos(new Vector2(0, y0));
+        }
 
         DrawFields(client, view);
         DrawPlayers(view);
@@ -502,7 +504,9 @@ public sealed class MainWindow : Window
         const float cell = 48f;
         var w = cell * 8;
         var h = cell * 9;
-        var origin = ImGui.GetCursorScreenPos();
+        var rawPos = ImGui.GetCursorScreenPos();
+        var boardPx = cell * 8 + 24;
+        var origin = new Vector2(rawPos.X + MathF.Max(0f, (ImGui.GetContentRegionAvail().X - boardPx) / 2f), rawPos.Y);
         var dl = ImGui.GetWindowDrawList();
 
         // 底色
