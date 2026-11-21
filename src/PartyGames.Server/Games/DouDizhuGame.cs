@@ -59,11 +59,13 @@ public sealed class DouDizhuGame : IGameModule
         13 => "小王", _ => "大王",
     };
 
+    private static readonly string[] Suits = { "♠", "♥", "♣", "♦" };
+
     private static string CardName(int card) => card switch
     {
         52 => "小王",
         53 => "大王",
-        _ => RankName(card % 13),
+        _ => RankName(card % 13) + Suits[card / 13],
     };
 
     private static int RankOf(int card) => card switch
@@ -98,6 +100,8 @@ public sealed class DouDizhuGame : IGameModule
             .Replace(",", string.Empty)
             .Replace("，", string.Empty)
             .Replace("\t", string.Empty)
+            .Replace("♠", string.Empty).Replace("♥", string.Empty)
+            .Replace("♣", string.Empty).Replace("♦", string.Empty)
             .Trim();
 
         if (raw.Length == 0)

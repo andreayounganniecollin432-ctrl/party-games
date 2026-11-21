@@ -433,21 +433,23 @@ public sealed class MainWindow : Window
             if (i > 0 && i % 9 != 0) ImGui.SameLine();
 
             var picked = pickedCards.Contains(i);
-            if (picked)
-            {
-                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.78f, 0.62f, 0.33f, 1f));
-                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.88f, 0.72f, 0.40f, 1f));
-                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.10f, 0.09f, 0.06f, 1f));
-            }
+            var isRed = tokens[i].Contains('♥') || tokens[i].Contains('♦');
+            var face = picked ? new Vector4(0.86f, 0.70f, 0.38f, 1f) : new Vector4(0.96f, 0.95f, 0.92f, 1f);
+            ImGui.PushStyleColor(ImGuiCol.Button, face);
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(1.0f, 0.97f, 0.88f, 1f));
+            ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(1.0f, 0.90f, 0.70f, 1f));
+            ImGui.PushStyleColor(ImGuiCol.Text, isRed
+                ? new Vector4(0.78f, 0.12f, 0.12f, 1f)
+                : new Vector4(0.10f, 0.10f, 0.12f, 1f));
 
             ImGui.PushID($"card{i}");
-            if (ImGui.Button(tokens[i], new Vector2(44, 52)))
+            if (ImGui.Button(tokens[i], new Vector2(46, 56)))
             {
                 if (picked) pickedCards.Remove(i); else pickedCards.Add(i);
             }
             ImGui.PopID();
 
-            if (picked) ImGui.PopStyleColor(3);
+            ImGui.PopStyleColor(4);
         }
 
         ImGui.Spacing();
