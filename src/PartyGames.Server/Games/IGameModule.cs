@@ -83,6 +83,7 @@ public static class GameRegistry
         () => new TurtleSoupGame(),
         () => new DouDizhuGame(),
         () => new XiangqiGame(),
+        () => new LobbyGame(),
     };
 
     public static IGameModule? Create(string id) =>

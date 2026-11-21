@@ -217,6 +217,14 @@ public sealed class MainWindow : Window
             return;
         }
 
+        ImGui.SameLine();
+        var syncOn = plugin.Configuration.SyncChatToGame;
+        if (ImGui.Checkbox("同步到游戏聊天", ref syncOn))
+        {
+            plugin.Configuration.SyncChatToGame = syncOn;
+            plugin.Configuration.Save();
+        }
+
         ImGui.Separator();
         ImGui.Spacing();
     }
@@ -250,6 +258,14 @@ public sealed class MainWindow : Window
         {
             TextMuted("服务器没有报告任何游戏。");
         }
+
+        if (ImGui.Button("进入聊天大厅", new Vector2(160, 0)))
+        {
+            _ = client.SendAsync(Msg.JoinRoom, new JoinRoomRequest { Code = "LOBBY" });
+        }
+        ImGui.SameLine();
+        Theme.Label("大厅不玩牌，只聊天");
+        ImGui.Spacing();
 
         foreach (var game in client.Games)
         {

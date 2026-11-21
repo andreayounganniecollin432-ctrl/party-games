@@ -13,6 +13,20 @@ public sealed class Hub : IHostedService
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, Room> _rooms = new(StringComparer.OrdinalIgnoreCase);
+
+    private const string LobbyCode = "LOBBY";
+
+    /// <summary>确保常驻大厅存在。</summary>
+    private Room EnsureLobby()
+    {
+        if (_rooms.TryGetValue(LobbyCode, out var existing)) return existing;
+
+        var descriptor = GameRegistry.Find("lobby")!;
+        var room = new Room(LobbyCode, descriptor, 200);
+        _rooms[LobbyCode] = room;
+        _logger.LogInformation("lobby room created");
+        return room;
+    }
     private readonly Dictionary<string, Connection> _connections = new();
     private readonly ILogger<Hub> _logger;
     private Timer? _timer;
@@ -363,13 +377,16 @@ public sealed class Hub : IHostedService
             return;
         }
 
+        if (code == LobbyCode) EnsureLobby();
+
         if (!_rooms.TryGetValue(code, out var room))
         {
             SendError(connection, "no_room", $"找不到房间 {code}。");
             return;
         }
 
-        if (room.Phase != RoomPhase.Lobby)
+        // 大厅常驻，没有"开局"概念
+        if (room.Phase != RoomPhase.Lobby && code != LobbyCode)
         {
             SendError(connection, "in_progress", "这局已经开始了，等下一局吧。");
             return;
