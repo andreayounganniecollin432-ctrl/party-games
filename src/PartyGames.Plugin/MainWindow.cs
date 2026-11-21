@@ -28,6 +28,8 @@ public sealed class MainWindow : Window
     private bool lastHadActions;
     private List<string> images = new();
     private int lastLogCount;
+    private readonly List<int> pickedCards = new();
+    private string lastHandText = string.Empty;
     private string avatarPath = string.Empty;
     private string backgroundPath = string.Empty;
     private readonly Artwork artwork;
@@ -355,6 +357,7 @@ public sealed class MainWindow : Window
         DrawScoreboard(view);
         DrawStats(view);
         ImGui.Spacing();
+        if (snapshot.GameId == "doudizhu") DrawCardPicker(client, view);
         DrawActions(client, view);
         DrawActionInput(client, view);
         DrawLog(client);
@@ -410,6 +413,61 @@ public sealed class MainWindow : Window
         ImGui.Spacing();
     }
 
+    /// <summary>斗地主图形选牌：把手牌拆成按钮，点选后一键出牌。</summary>
+    private void DrawCardPicker(GameClient client, GameView view)
+    {
+        var hand = view.PrivateNote;
+        if (string.IsNullOrWhiteSpace(hand)) return;
+
+        if (hand != lastHandText)
+        {
+            lastHandText = hand!;
+            pickedCards.Clear();
+        }
+
+        var tokens = hand!.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        Theme.Section($"选牌（{pickedCards.Count}/{tokens.Length}）");
+
+        for (var i = 0; i < tokens.Length; i++)
+        {
+            if (i > 0 && i % 9 != 0) ImGui.SameLine();
+
+            var picked = pickedCards.Contains(i);
+            if (picked)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.78f, 0.62f, 0.33f, 1f));
+                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.88f, 0.72f, 0.40f, 1f));
+                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.10f, 0.09f, 0.06f, 1f));
+            }
+
+            ImGui.PushID($"card{i}");
+            if (ImGui.Button(tokens[i], new Vector2(44, 52)))
+            {
+                if (picked) pickedCards.Remove(i); else pickedCards.Add(i);
+            }
+            ImGui.PopID();
+
+            if (picked) ImGui.PopStyleColor(3);
+        }
+
+        ImGui.Spacing();
+
+        var canPlay = view.AcceptsText && pickedCards.Count > 0;
+        if (!canPlay) ImGui.BeginDisabled();
+        if (Theme.PrimaryButton("出牌", new Vector2(120, 0)))
+        {
+            var text = string.Join(" ", pickedCards.OrderBy(i => i).Select(i => tokens[i]));
+            _ = client.SendAsync(Msg.Action, new ActionRequest { Kind = "play", Text = text });
+            pickedCards.Clear();
+        }
+        if (!canPlay) ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        if (ImGui.Button("清空", new Vector2(80, 0))) pickedCards.Clear();
+
+        ImGui.SameLine();
+        Theme.Label(canPlay ? "点牌选中，再点出牌" : "现在不是你的回合");
+    }
     private static void Send(GameClient client, string key, string value)
     {
         _ = client.SendAsync(Msg.Action, new ActionRequest

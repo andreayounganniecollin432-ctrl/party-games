@@ -81,6 +81,7 @@ public static class GameRegistry
         () => new WerewolfGame(),
         () => new WordChainGame(),
         () => new TurtleSoupGame(),
+        () => new DouDizhuGame(),
     };
 
     public static IGameModule? Create(string id) =>
