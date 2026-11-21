@@ -352,9 +352,29 @@ public sealed class MainWindow : Window
         }
 
         ImGui.Spacing();
-        DrawFields(client, view);
-        DrawPlayers(view);
+
+        // 右侧留白放玩家面板
+        var y0 = ImGui.GetCursorPosY();
+        var sideW = 250f;
+        ImGui.SetCursorPos(new Vector2(Math.Max(320f, ImGui.GetWindowWidth() - sideW - 16f), y0));
+        ImGui.BeginChild("##side", new Vector2(sideW, 360f), true, ImGuiWindowFlags.None);
+        TextMuted("当前玩家");
+        foreach (var p in view.Players)
+        {
+            var line = p.Name + (p.IsYou ? "（你）" : string.Empty);
+            if (!string.IsNullOrEmpty(p.Badge)) line += $" [{p.Badge}]";
+            if (!string.IsNullOrEmpty(p.Sub)) line += $"  {p.Sub}";
+            if (!p.IsAlive) ImGui.TextDisabled(line);
+            else if (p.Accent == "good") TextColored(Good, line);
+            else if (p.Accent == "bad") TextColored(Warn, line);
+            else ImGui.Text(line);
+        }
+
         DrawScoreboard(view);
+        ImGui.EndChild();
+        ImGui.SetCursorPos(new Vector2(0, y0));
+
+        DrawFields(client, view);
         DrawStats(view);
         ImGui.Spacing();
         if (snapshot.GameId == "doudizhu") DrawCardPicker(client, view);

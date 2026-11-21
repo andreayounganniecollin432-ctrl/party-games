@@ -75,6 +75,10 @@ public sealed class DouDizhuGame : IGameModule
         _ => card % 13,
     };
 
+    /// <summary>把"点数序列"格式化成文字（不含花色）。</summary>
+    private static string RanksText(IEnumerable<int> ranks) =>
+        string.Join(" ", ranks.Select(RankName));
+
     private static string HandText(IEnumerable<int> cards) =>
         string.Join(" ", cards.OrderBy(RankOf).ThenBy(c => c).Select(CardName));
 
@@ -410,7 +414,7 @@ public sealed class DouDizhuGame : IGameModule
         _lastCombo = combo;
         _lastOwner = index;
 
-        room.Log("result", $"{seat.Name} 出牌：{HandText(ranks)}（{TypeName(combo)}）");
+        room.Log("result", $"{seat.Name} 出牌：{RanksText(ranks)}（{TypeName(combo)}）");
 
         if (seat.Hand.Count == 0)
         {
