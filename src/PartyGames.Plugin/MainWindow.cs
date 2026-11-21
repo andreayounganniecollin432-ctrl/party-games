@@ -358,6 +358,19 @@ public sealed class MainWindow : Window
         var sideW = 250f;
         ImGui.SetCursorPos(new Vector2(Math.Max(320f, ImGui.GetWindowWidth() - sideW - 16f), y0));
         ImGui.BeginChild("##side", new Vector2(sideW, 360f), true, ImGuiWindowFlags.None);
+        // 最近一手牌（从出牌日志里解析）
+        var lastPlay = FindLastPlay(client);
+        if (lastPlay.Length > 0)
+        {
+            TextMuted("最近出牌");
+            for (var i = 0; i < lastPlay.Length; i++)
+            {
+                if (i > 0 && i % 5 != 0) ImGui.SameLine();
+                DrawCardFace(lastPlay[i]);
+            }
+            ImGui.Spacing();
+        }
+
         TextMuted("当前玩家");
         foreach (var p in view.Players)
         {
@@ -433,6 +446,55 @@ public sealed class MainWindow : Window
         ImGui.Spacing();
     }
 
+    /// <summary>从最近的事件里找出"出牌："后面的牌面。</summary>
+    private static string[] FindLastPlay(GameClient client)
+    {
+        for (var i = client.Events.Count - 1; i >= 0; i--)
+        {
+            var e = client.Events[i];
+            if (e.Kind != "result") continue;
+            var text = e.Text ?? string.Empty;
+            var at = text.IndexOf("出牌：", StringComparison.Ordinal);
+            if (at < 0) continue;
+            var rest = text[(at + 3)..];
+            var end = rest.IndexOf('（');
+            if (end > 0) rest = rest[..end];
+            var tokens = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length > 0) return tokens;
+        }
+        return Array.Empty<string>();
+    }
+
+    /// <summary>画一张牌面（无交互）。</summary>
+    private static void DrawCardFace(string token)
+    {
+        var size = new Vector2(44, 60);
+        var p0 = ImGui.GetCursorScreenPos();
+        var dl = ImGui.GetWindowDrawList();
+
+        var suit = token.Length > 0 && "♠♥♣♦".IndexOf(token[token.Length - 1]) >= 0 ? token[token.Length - 1] : '\0';
+        var rank = suit == '\0' ? token : token[..^1];
+        var isRed = suit == '♥' || suit == '♦';
+        if (token is "小王" or "大王") isRed = false;
+
+        var a = p0;
+        var b = new Vector2(p0.X + size.X, p0.Y + size.Y);
+
+        dl.AddRectFilled(new Vector2(a.X + 2, a.Y + 3), new Vector2(b.X + 2, b.Y + 3),
+            ImGui.GetColorU32(new Vector4(0f, 0f, 0f, 0.35f)), 5f);
+        dl.AddRectFilled(a, b, ImGui.GetColorU32(new Vector4(0.97f, 0.96f, 0.93f, 1f)), 5f);
+        dl.AddRect(a, b, ImGui.GetColorU32(new Vector4(0.55f, 0.52f, 0.45f, 1f)), 5f, 0, 1.2f);
+
+        var ink = ImGui.GetColorU32(isRed ? new Vector4(0.80f, 0.12f, 0.12f, 1f) : new Vector4(0.12f, 0.12f, 0.14f, 1f));
+        dl.AddText(new Vector2(a.X + 4, a.Y + 3), ink, rank);
+        if (suit != '\0') dl.AddText(new Vector2(a.X + 4, a.Y + 16), ink, suit.ToString());
+
+        var big = suit == '\0' ? (token == "小王" ? "小" : "大") : suit.ToString();
+        var bigSize = ImGui.CalcTextSize(big);
+        dl.AddText(new Vector2(a.X + (size.X - bigSize.X) / 2, b.Y - bigSize.Y - 6), ink, big);
+
+        ImGui.Dummy(size);
+    }
     /// <summary>斗地主图形选牌：把手牌拆成按钮，点选后一键出牌。</summary>
     private void DrawCardPicker(GameClient client, GameView view)
     {
