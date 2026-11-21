@@ -30,6 +30,7 @@ public sealed class MainWindow : Window
     private int lastLogCount;
     private readonly List<int> pickedCards = new();
     private string lastHandText = string.Empty;
+    private int lastVoiceLogCount;
     private string avatarPath = string.Empty;
     private string backgroundPath = string.Empty;
     private readonly Artwork artwork;
@@ -288,9 +289,44 @@ public sealed class MainWindow : Window
             var hasActions = view.Actions is { Count: > 0 };
             if (hasActions && !lastHadActions && plugin.Configuration.SoundEnabled && plugin.Configuration.VoiceEnabled)
             {
-                Sfx.PlayClip("turn-you", "轮到你啦");
+                Sfx.PlayClip("dz-lundao", "轮到你了");
             }
             lastHadActions = hasActions;
+
+            // 新出的牌 → 用珊瑚的声音念牌型
+            if (snapshot.GameId == "doudizhu" && plugin.Configuration.SoundEnabled)
+            {
+                if (client.Events.Count > lastVoiceLogCount)
+                {
+                    for (var i = lastVoiceLogCount; i < client.Events.Count; i++)
+                    {
+                        var e = client.Events[i];
+                        var t = e.Text ?? string.Empty;
+                        if (t.Contains("过牌")) { Sfx.PlayClip("dz-buyao"); continue; }
+
+                        var open = t.IndexOf('（');
+                        var close = t.IndexOf('）');
+                        if (open < 0 || close <= open) continue;
+                        var kind = t[(open + 1)..close];
+                        var clip = kind switch
+                        {
+                            "单张" => "dz-danzhang",
+                            "对子" => "dz-duizi",
+                            "三张" => "dz-sanzhang",
+                            "三带一" => "dz-sandaiyi",
+                            "三带二" => "dz-sandaier",
+                            "顺子" => "dz-shunzi",
+                            "连对" => "dz-liandui",
+                            "飞机" => "dz-feiji",
+                            "炸弹" => "dz-zhadan",
+                            "王炸" => "dz-wangzha",
+                            _ => null,
+                        };
+                        if (clip is not null) Sfx.PlayClip(clip, kind);
+                    }
+                    lastVoiceLogCount = client.Events.Count;
+                }
+            }
 
             var key = (view.Instruction ?? string.Empty) + "|" + (view.ResultBanner ?? string.Empty);
             if (key != lastAnnounce)
@@ -353,41 +389,34 @@ public sealed class MainWindow : Window
 
         ImGui.Spacing();
 
-        // 右侧留白放玩家面板
+        // 右侧：出牌记录（图形）
         var y0 = ImGui.GetCursorPosY();
         var sideW = 250f;
         ImGui.SetCursorPos(new Vector2(Math.Max(320f, ImGui.GetWindowWidth() - sideW - 16f), y0));
         ImGui.BeginChild("##side", new Vector2(sideW, 360f), true, ImGuiWindowFlags.None);
-        // 最近一手牌（从出牌日志里解析）
-        var lastPlay = FindLastPlay(client);
-        if (lastPlay.Length > 0)
+        // 出牌记录（图形）
+        var plays = FindRecentPlays(client, 4);
+        if (plays.Count > 0)
         {
-            TextMuted("最近出牌");
-            for (var i = 0; i < lastPlay.Length; i++)
+            TextMuted($"出牌记录（最近 {plays.Count} 手）");
+            foreach (var (actor, cards) in plays)
             {
-                if (i > 0 && i % 5 != 0) ImGui.SameLine();
-                DrawCardFace(lastPlay[i]);
+                TextColored(Muted, actor);
+                for (var i = 0; i < cards.Length; i++)
+                {
+                    if (i > 0 && i % 5 != 0) ImGui.SameLine();
+                    DrawCardFace(cards[i]);
+                }
+                ImGui.Spacing();
             }
-            ImGui.Spacing();
         }
 
-        TextMuted("当前玩家");
-        foreach (var p in view.Players)
-        {
-            var line = p.Name + (p.IsYou ? "（你）" : string.Empty);
-            if (!string.IsNullOrEmpty(p.Badge)) line += $" [{p.Badge}]";
-            if (!string.IsNullOrEmpty(p.Sub)) line += $"  {p.Sub}";
-            if (!p.IsAlive) ImGui.TextDisabled(line);
-            else if (p.Accent == "good") TextColored(Good, line);
-            else if (p.Accent == "bad") TextColored(Warn, line);
-            else ImGui.Text(line);
-        }
-
-        DrawScoreboard(view);
         ImGui.EndChild();
         ImGui.SetCursorPos(new Vector2(0, y0));
 
         DrawFields(client, view);
+        DrawPlayers(view);
+        DrawScoreboard(view);
         DrawStats(view);
         ImGui.Spacing();
         if (snapshot.GameId == "doudizhu") DrawCardPicker(client, view);
@@ -446,7 +475,28 @@ public sealed class MainWindow : Window
         ImGui.Spacing();
     }
 
-    /// <summary>从最近的事件里找出"出牌："后面的牌面。</summary>
+    /// <summary>取出最近 N 手出牌（演员 + 牌面）。</summary>
+    private static List<(string Actor, string[] Cards)> FindRecentPlays(GameClient client, int max)
+    {
+        var list = new List<(string, string[])>();
+        for (var i = client.Events.Count - 1; i >= 0 && list.Count < max; i--)
+        {
+            var e = client.Events[i];
+            if (e.Kind != "result") continue;
+            var text = e.Text ?? string.Empty;
+            var at = text.IndexOf("出牌：", StringComparison.Ordinal);
+            if (at < 0) continue;
+            var rest = text[(at + 3)..];
+            var end = rest.IndexOf('（');
+            if (end > 0) rest = rest[..end];
+            var tokens = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length == 0) continue;
+            list.Add((e.Actor ?? "?", tokens));
+        }
+        list.Reverse();
+        return list;
+    }
+
     private static string[] FindLastPlay(GameClient client)
     {
         for (var i = client.Events.Count - 1; i >= 0; i--)
