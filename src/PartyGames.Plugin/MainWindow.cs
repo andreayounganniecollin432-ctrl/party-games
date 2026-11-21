@@ -149,7 +149,7 @@ public sealed class MainWindow : Window
         ImGui.Spacing();
         Theme.Label("把房间码发给朋友，3-20 人就能开局。");
 
-        Theme.Section("聊天");
+        Theme.Section("提示");
 
         var sync = plugin.Configuration.SyncChatToGame;
         if (ImGui.Checkbox("同步聊天到游戏聊天框（Echo，只有自己看得到）", ref sync))
@@ -219,7 +219,7 @@ public sealed class MainWindow : Window
 
         ImGui.SameLine();
         var syncOn = plugin.Configuration.SyncChatToGame;
-        if (ImGui.Checkbox("同步到游戏聊天", ref syncOn))
+        if (ImGui.Checkbox("聊天提示", ref syncOn))
         {
             plugin.Configuration.SyncChatToGame = syncOn;
             plugin.Configuration.Save();
@@ -530,18 +530,7 @@ public sealed class MainWindow : Window
             var e = client.Events[i];
             if (e.Kind != "chat") continue;
             var who = string.IsNullOrEmpty(e.Actor) ? "派对" : e.Actor;
-            try
-            {
-                plugin.Chat.Print(new XivChatEntry
-                {
-                    Type = XivChatType.Echo,
-                    Message = $"[派对] {who}：{e.Text}",
-                });
-            }
-            catch
-            {
-                /* 打印失败不影响界面 */
-            }
+            Toasts.Push($"{who}：{e.Text}");
         }
 
         lastEchoCount = client.Events.Count;

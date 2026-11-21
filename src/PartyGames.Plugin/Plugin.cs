@@ -87,6 +87,7 @@ public sealed class Plugin : IDalamudPlugin
             Configuration.Save();
         }
 
+        Toasts.Draw();
         windowSystem.Draw();
     }
 
