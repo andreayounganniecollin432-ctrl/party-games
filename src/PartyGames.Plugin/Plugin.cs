@@ -14,6 +14,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ICommandManager commandManager;
     private readonly WindowSystem windowSystem = new("PartyGames");
     private readonly MainWindow mainWindow;
+    private int lastToastIndex;
 
     public Plugin(
         IDalamudPluginInterface pluginInterface,
@@ -85,6 +86,23 @@ public sealed class Plugin : IDalamudPlugin
             Configuration.LastRoomCode = Client.Room.Code;
             Configuration.LastPlayerId = Client.PlayerId ?? string.Empty;
             Configuration.Save();
+        }
+
+        // 常驻：窗口关着也接收聊天提示
+        if (Configuration.SyncChatToGame)
+        {
+            var events = Client.Events;
+            if (events.Count > lastToastIndex)
+            {
+                for (var i = lastToastIndex; i < events.Count; i++)
+                {
+                    var e = events[i];
+                    if (e.Kind != "chat") continue;
+                    var who = string.IsNullOrEmpty(e.Actor) ? "派对" : e.Actor;
+                    Toasts.Push($"{who}：{e.Text}");
+                }
+                lastToastIndex = events.Count;
+            }
         }
 
         Toasts.Draw();
