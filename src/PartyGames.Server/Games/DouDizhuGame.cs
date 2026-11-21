@@ -190,6 +190,38 @@ public sealed class DouDizhuGame : IGameModule
             }
         }
 
+        // 飞机：连续的三张（至少两组），可带同数量的单牌或对子
+        if (groups.Count >= 2)
+        {
+            var triples = groupsByRank.Where(kv => kv.Value >= 3).Select(kv => kv.Key).OrderBy(k => k).ToList();
+            if (triples.Count >= 2 && triples.Max() <= 11)
+            {
+                var consecutive = true;
+                for (var i = 1; i < triples.Count; i++)
+                    if (triples[i] != triples[i - 1] + 1) { consecutive = false; break; }
+
+                if (consecutive)
+                {
+                    var n = triples.Count;
+                    var core = n * 3;
+                    var rest = ranks.Count - core;
+                    var wingOk = rest == 0 || rest == n || rest == n * 2;
+
+                    if (wingOk)
+                    {
+                        // 带牌不能是王或者超过两种点数（简单校验）
+                        var type = rest == 0 ? "plane" : rest == n ? "plane1" : "plane2";
+                        return new Combo
+                        {
+                            Type = type,
+                            Rank = triples.Max(),
+                            Length = n,
+                            Count = ranks.Count,
+                        };
+                    }
+                }
+            }
+        }
         // 顺子：至少 5 张，连续，且不含 2 和王
         if (ranks.Count >= 5 && groups.Count == ranks.Count && distinct.Max() <= 11)
         {
@@ -448,6 +480,9 @@ public sealed class DouDizhuGame : IGameModule
         "triple2" => "三带二",
         "straight" => $"{c.Length} 连顺",
         "pairs" => $"{c.Length} 连对",
+        "plane" => "飞机",
+        "plane1" => "飞机带单",
+        "plane2" => "飞机带对",
         "bomb" => "炸弹",
         "rocket" => "王炸",
         _ => "牌",

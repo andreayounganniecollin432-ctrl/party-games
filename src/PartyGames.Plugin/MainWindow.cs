@@ -337,7 +337,10 @@ public sealed class MainWindow : Window
                 lastAnnounce = key;
                 if (plugin.Configuration.SoundEnabled)
                 {
-                    var say = !string.IsNullOrEmpty(view.ResultBanner) ? view.ResultBanner : view.Instruction;
+                    // 斗地主：牌型和"轮到你了"都由珊瑚语音播，这里不再用系统语音念
+                    var say = snapshot.GameId == "doudizhu"
+                        ? string.Empty
+                        : (!string.IsNullOrEmpty(view.ResultBanner) ? view.ResultBanner : view.Instruction);
                     if (plugin.Configuration.VoiceEnabled && !string.IsNullOrEmpty(say))
                     {
                         say = say.Replace("*", " ").Replace("【", string.Empty).Replace("】", string.Empty).Replace("\n", " ");
