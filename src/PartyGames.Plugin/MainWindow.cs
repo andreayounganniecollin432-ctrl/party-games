@@ -424,6 +424,16 @@ public sealed class MainWindow : Window
         DrawScoreboard(view);
         DrawStats(view);
         ImGui.Spacing();
+        // 认输：仅象棋与斗地主，点了直接结算
+        if ((snapshot.GameId == "xiangqi" || snapshot.GameId == "doudizhu")
+            && string.IsNullOrEmpty(view.ResultBanner))
+        {
+            if (ImGui.Button("认输", new Vector2(80, 0)))
+            {
+                _ = client.SendAsync(Msg.Action, new ActionRequest { Kind = "resign" });
+            }
+            ImGui.SameLine();
+        }
         if (snapshot.GameId == "doudizhu") DrawCardPicker(client, view);
         if (snapshot.GameId == "xiangqi") DrawXiangqiBoard(client, view);
         DrawActions(client, view);

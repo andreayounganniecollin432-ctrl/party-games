@@ -300,6 +300,18 @@ public sealed class DouDizhuGame : IGameModule
     {
         if (_finished) return;
 
+        // 认输：地主认输则农民赢，农民认输则地主赢
+        if (request.Kind == "resign")
+        {
+            var who = _seats.FindIndex(s => s.PlayerId == player.Id);
+            if (who >= 0 && _landlord >= 0)
+            {
+                room.Log("system", $"{_seats[who].Name} 认输了。");
+                Finish(room, who == _landlord ? (_landlord + 1) % 3 : _landlord);
+            }
+            return;
+        }
+
         var index = _seats.FindIndex(s => s.PlayerId == player.Id);
         if (index < 0) return;
 

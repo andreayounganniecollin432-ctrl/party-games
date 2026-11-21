@@ -94,10 +94,19 @@ public sealed class XiangqiGame : IGameModule
 
     public void HandleAction(Room room, Player player, ActionRequest request)
     {
-        if (_finished || request.Kind != "move") return;
+        if (_finished) return;
 
         var side = MySide(player.Id);
-        if (side < 0 || side != _turn) return;
+        if (side < 0) return;
+
+        // 认输：对方获胜，游戏结束
+        if (request.Kind == "resign")
+        {
+            Finish(room, 1 - side, "对手认输");
+            return;
+        }
+
+        if (request.Kind != "move" || side != _turn) return;
 
         var text = (request.Text ?? string.Empty).Trim();
         if (text.Length < 4 || !int.TryParse(text, out _)) return;
