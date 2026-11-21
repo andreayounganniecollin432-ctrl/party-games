@@ -216,6 +216,12 @@ public sealed class GameView
     public string Title { get; set; } = string.Empty;
     public string? Subtitle { get; set; }
     public string? Instruction { get; set; }
+
+    /// <summary>棋盘：10 行 × 9 列，大写=红方 小写=黑方，. 表示空。</summary>
+    public List<string> Board { get; set; } = new();
+
+    /// <summary>可落点，每项是 "起行起列终行终列" 四位数。</summary>
+    public List<string> Targets { get; set; } = new();
     public string? PrivateNote { get; set; }
     public string? PrivateNoteLabel { get; set; }
     public string? ResultBanner { get; set; }

@@ -31,6 +31,9 @@ public sealed class MainWindow : Window
     private readonly List<int> pickedCards = new();
     private string lastHandText = string.Empty;
     private int lastVoiceLogCount;
+    private int xqSelR = -1;
+    private int xqSelC = -1;
+    private string xqBoardKey = string.Empty;
     private string avatarPath = string.Empty;
     private string backgroundPath = string.Empty;
     private readonly Artwork artwork;
@@ -420,6 +423,7 @@ public sealed class MainWindow : Window
         DrawStats(view);
         ImGui.Spacing();
         if (snapshot.GameId == "doudizhu") DrawCardPicker(client, view);
+        if (snapshot.GameId == "xiangqi") DrawXiangqiBoard(client, view);
         DrawActions(client, view);
         DrawActionInput(client, view);
         DrawLog(client);
@@ -475,6 +479,136 @@ public sealed class MainWindow : Window
         ImGui.Spacing();
     }
 
+    private static string XqPiece(char p) => p switch
+    {
+        'K' => "帅", 'A' => "仕", 'B' => "相", 'N' => "马", 'R' => "车", 'C' => "炮", 'P' => "兵",
+        'k' => "将", 'a' => "士", 'b' => "象", 'n' => "马", 'r' => "车", 'c' => "炮", 'p' => "卒",
+        _ => string.Empty,
+    };
+
+    /// <summary>象棋棋盘：9×10，点击选子再点落点。</summary>
+    private void DrawXiangqiBoard(GameClient client, GameView view)
+    {
+        if (view.Board.Count < 10) return;
+
+        var key = string.Join("|", view.Board);
+        if (key != xqBoardKey)
+        {
+            xqBoardKey = key;
+            xqSelR = -1;
+            xqSelC = -1;
+        }
+
+        const float cell = 48f;
+        var w = cell * 8;
+        var h = cell * 9;
+        var origin = ImGui.GetCursorScreenPos();
+        var dl = ImGui.GetWindowDrawList();
+
+        // 底色
+        dl.AddRectFilled(new Vector2(origin.X - 12, origin.Y - 12),
+            new Vector2(origin.X + w + 12, origin.Y + h + 12),
+            ImGui.GetColorU32(new Vector4(0.93f, 0.86f, 0.70f, 1f)), 6f);
+
+        var lineCol = ImGui.GetColorU32(new Vector4(0.35f, 0.28f, 0.18f, 1f));
+
+        // 横线
+        for (var r = 0; r < 10; r++)
+        {
+            var y = origin.Y + r * cell;
+            dl.AddLine(new Vector2(origin.X, y), new Vector2(origin.X + w, y), lineCol, 1.4f);
+        }
+
+        // 竖线（中间楚河汉界断开）
+        for (var col = 0; col < 9; col++)
+        {
+            var x = origin.X + col * cell;
+            if (col == 0 || col == 8)
+            {
+                dl.AddLine(new Vector2(x, origin.Y), new Vector2(x, origin.Y + h), lineCol, 1.4f);
+            }
+            else
+            {
+                dl.AddLine(new Vector2(x, origin.Y), new Vector2(x, origin.Y + 4 * cell), lineCol, 1.4f);
+                dl.AddLine(new Vector2(x, origin.Y + 5 * cell), new Vector2(x, origin.Y + h), lineCol, 1.4f);
+            }
+        }
+
+        // 高亮：选中格 + 可落点
+        var targets = new HashSet<string>(view.Targets);
+
+        for (var r = 0; r < 10; r++)
+        {
+            for (var col = 0; col < 9; col++)
+            {
+                var ch = view.Board[r][col];
+                var cx = origin.X + col * cell;
+                var cy = origin.Y + r * cell;
+
+                if (r == xqSelR && col == xqSelC)
+                    dl.AddCircleFilled(new Vector2(cx, cy), cell * 0.46f, ImGui.GetColorU32(new Vector4(0.95f, 0.75f, 0.25f, 0.55f)), 20);
+
+                foreach (var t in view.Targets)
+                {
+                    if (t.Length == 4 && t[2] - '0' == r && t[3] - '0' == col)
+                    {
+                        dl.AddCircleFilled(new Vector2(cx, cy), 6f, ImGui.GetColorU32(new Vector4(0.15f, 0.55f, 0.25f, 0.75f)), 12);
+                        break;
+                    }
+                }
+
+                if (ch == '.') continue;
+
+                var isRed = char.IsUpper(ch);
+                var fill = isRed ? new Vector4(0.98f, 0.94f, 0.86f, 1f) : new Vector4(0.90f, 0.88f, 0.84f, 1f);
+                var ring = isRed ? new Vector4(0.70f, 0.15f, 0.15f, 1f) : new Vector4(0.15f, 0.15f, 0.18f, 1f);
+
+                dl.AddCircleFilled(new Vector2(cx, cy), cell * 0.42f, ImGui.GetColorU32(fill), 24);
+                dl.AddCircle(new Vector2(cx, cy), cell * 0.42f, ImGui.GetColorU32(ring), 24, 2f);
+
+                var text = XqPiece(ch);
+                var ts = ImGui.CalcTextSize(text);
+                dl.AddText(new Vector2(cx - ts.X / 2, cy - ts.Y / 2), ImGui.GetColorU32(ring), text);
+            }
+        }
+
+        // 点击处理
+        ImGui.InvisibleButton("##xqboard", new Vector2(w + 24, h + 24));
+        var clicked = ImGui.IsItemClicked();
+        var mouse = ImGui.GetMousePos();
+
+        if (clicked)
+        {
+            var col = (int)MathF.Round((mouse.X - origin.X) / cell);
+            var row = (int)MathF.Round((mouse.Y - origin.Y) / cell);
+            if (row >= 0 && row < 10 && col >= 0 && col < 9)
+            {
+                if (xqSelR >= 0)
+                {
+                    var move = $"{xqSelR}{xqSelC}{row}{col}";
+                    if (targets.Contains(move))
+                    {
+                        _ = client.SendAsync(Msg.Action, new ActionRequest { Kind = "move", Text = move });
+                        xqSelR = -1;
+                        xqSelC = -1;
+                        return;
+                    }
+                }
+
+                var ch = view.Board[row][col];
+                if (ch != '.' && targets.Any(t => t.Length == 4 && t[0] - '0' == row && t[1] - '0' == col))
+                {
+                    xqSelR = row;
+                    xqSelC = col;
+                }
+                else
+                {
+                    xqSelR = -1;
+                    xqSelC = -1;
+                }
+            }
+        }
+    }
     /// <summary>取出最近 N 手出牌（演员 + 牌面）。</summary>
     private static List<(string Actor, string[] Cards)> FindRecentPlays(GameClient client, int max)
     {
