@@ -21,9 +21,22 @@ public static class Ui
             return Paint(label, value, null, maxLength);
         }
 
-        return Theme.Glass
-            ? Gw.TextField(ref value, label, string.Empty, maxLength)
-            : ImGui.InputText(label, ref value, maxLength);
+        if (!Theme.Glass)
+        {
+            return ImGui.InputText(label, ref value, maxLength);
+        }
+
+        // Glasswork 的 TextField 是 (值, 位内占位符, 框外标签)：以前把 label 当占位符传，
+        // 「服务器 / 昵称」这些标签就跑到框里去了。隐藏 id（## 开头）不能画成标签，用 PushID 顶替。
+        if (IsHiddenLabel(label))
+        {
+            ImGui.PushID(label);
+            var changedHidden = Gw.TextField(ref value, default, default, maxLength);
+            ImGui.PopID();
+            return changedHidden;
+        }
+
+        return Gw.TextField(ref value, default, label, maxLength);
     }
 
     public static bool InputTextWithHint(string label, string hint, ref string value, int maxLength, ImGuiInputTextFlags flags = ImGuiInputTextFlags.None)
@@ -33,10 +46,25 @@ public static class Ui
             return Paint(label, value, hint, maxLength);
         }
 
-        return Theme.Glass
-            ? Gw.TextField(ref value, label, hint, maxLength, flags: flags)
-            : ImGui.InputTextWithHint(label, hint, ref value, maxLength, flags);
+        if (!Theme.Glass)
+        {
+            return ImGui.InputTextWithHint(label, hint, ref value, maxLength, flags);
+        }
+
+        if (IsHiddenLabel(label))
+        {
+            ImGui.PushID(label);
+            var changedHidden = Gw.TextField(ref value, hint, default, maxLength, flags: flags);
+            ImGui.PopID();
+            return changedHidden;
+        }
+
+        return Gw.TextField(ref value, hint, label, maxLength, flags: flags);
     }
+
+    /// <summary>"##xxx" 是 ImGui 的隐藏 id 写法：没有可见标签。</summary>
+    private static bool IsHiddenLabel(string label) =>
+        label.Length == 0 || label.StartsWith("##", StringComparison.Ordinal);
 
     /// <summary>Draws what the field would look like and reports "no change", so the caller's flow is untouched.</summary>
     private static bool Paint(string label, string value, string? hint, int maxLength)

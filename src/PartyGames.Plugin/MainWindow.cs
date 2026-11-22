@@ -29,7 +29,8 @@ public sealed class MainWindow : Window
     private string joinCode = string.Empty;
     private string chatInput = string.Empty;
     private bool refocusChat;
-    private bool windowFocused;
+    private bool chatParked;
+    private bool parkBlocked;
     private string actionInput = string.Empty;
     private int maxPlayers;
     private string lastAnnounce = string.Empty;
@@ -116,6 +117,9 @@ public sealed class MainWindow : Window
     private void DrawInner()
     {
         var client = host.Client;
+
+        // 连接页 / 大厅 / 收起状态都没有聊天框：别把键盘一直按着不放
+        if (client.Room is null || collapsed) ReleaseChatFocus();
 
         // 头像每帧同步（玻璃模式下背景不用图，但头像要用）
         artwork.Sync(string.Empty, ResolveAvatarPath() ?? string.Empty);
@@ -1534,33 +1538,65 @@ public sealed class MainWindow : Window
 
     private void DrawChat(IGameClient client)
     {
-        // 回车不能漏到游戏自己的聊天框：
-        // ① 窗口刚变成活动窗口；② 窗口是活动的、又没在编辑别的输入框，这时按回车——
-        // 都把焦点抓回插件聊天框（点过牌面/按钮以后焦点会丢，光靠"发送后置位"挡不住）。
-        var focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
-        if (focused)
-        {
-            var editing = ImGui.GetIO().WantTextInput;
-            if (!windowFocused || (!editing && ImGui.IsKeyPressed(ImGuiKey.Enter, false)))
-            {
-                refocusChat = true;
-            }
-        }
-
-        windowFocused = focused;
-
         const float sendWidth = 88f;
         var chatFieldWidth = MathF.Min(MathF.Max(160f, ImGui.GetContentRegionAvail().X - sendWidth - 12f), 520f);
-        ImGui.SetNextItemWidth(chatFieldWidth);
-        if (refocusChat)
+
+        // —— 键盘归谁 ——
+        // 插件窗口还是活动窗口的时候，就把焦点按在聊天框上。
+        // Dalamud 只在「有 ImGui 输入框正在编辑」（io.WantTextInput）时才把按键从游戏手里截下来，
+        // 所以焦点不在框里时，回车就会直接开游戏自己的聊天输入框——这就是一直没修好的那个问题。
+        // 鼠标点进游戏画面时 Dalamud 会清掉 ImGui 的窗口焦点，我们随即放手，键盘还给游戏。
+        var focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
+        var editing = ImGui.GetIO().WantTextInput;
+
+        // 在窗口里点一下 = 重新按住；Esc = 交还键盘（不然一直按着，走路都会被吃掉）
+        var clickedInside = ImGui.IsMouseClicked(ImGuiMouseButton.Left) &&
+                            ImGui.IsWindowHovered(ImGuiHoveredFlags.RootAndChildWindows |
+                                                  ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
+        if (clickedInside) parkBlocked = false;
+
+        if (chatParked && ImGui.IsKeyPressed(ImGuiKey.Escape, false))
         {
-            ImGui.SetKeyboardFocusHere();
-            refocusChat = false;
+            parkBlocked = true;
+            ReleaseChatFocus();
+        }
+        else if (!focused)
+        {
+            ReleaseChatFocus();
+        }
+        else if (!parkBlocked && (!editing || ImGui.IsKeyPressed(ImGuiKey.Enter, false)))
+        {
+            refocusChat = true;
         }
 
+        bool send;
+        bool active;
 
-        var send = Ui.InputTextWithHint("##chat", "说点什么…", ref chatInput, 140,
-            ImGuiInputTextFlags.EnterReturnsTrue);
+        if (Theme.Glass)
+        {
+            if (refocusChat)
+            {
+                ImGui.SetKeyboardFocusHere();
+                refocusChat = false;
+            }
+
+            send = GlassChatField("##chat", "说点什么…", ref chatInput, chatFieldWidth, out active);
+        }
+        else
+        {
+            ImGui.SetNextItemWidth(chatFieldWidth);
+            if (refocusChat)
+            {
+                ImGui.SetKeyboardFocusHere();
+                refocusChat = false;
+            }
+
+            send = Ui.InputTextWithHint("##chat", "说点什么…", ref chatInput, 140,
+                ImGuiInputTextFlags.EnterReturnsTrue);
+            active = ImGui.IsItemActive();
+        }
+
+        chatParked = active;
 
         ImGui.SameLine(0f, 8f);
         if (Theme.PrimaryButton("发送", new Vector2(sendWidth, 0))) send = true;
@@ -1570,6 +1606,60 @@ public sealed class MainWindow : Window
         _ = client.SendAsync(Msg.Chat, new ChatRequest { Text = chatInput.Trim() });
         chatInput = string.Empty;
         refocusChat = true;
+    }
+
+    /// <summary>
+    /// 玻璃模式下的聊天输入框：胶囊自己画，输入框用原生 ImGui。
+    /// 这里特意不用 Glasswork 的 TextField —— 聊天框必须能被程序按在焦点上
+    /// （回车要落到插件里，而不是游戏自己的聊天框），原生 InputText 的聚焦行为是确定的。
+    /// </summary>
+    private bool GlassChatField(string id, string hint, ref string value, float width, out bool active)
+    {
+        var p0 = ImGui.GetCursorScreenPos();
+        var height = ImGui.GetFrameHeight() + 10f;
+        var radius = height * 0.5f;
+        var bottomRight = new Vector2(p0.X + width, p0.Y + height);
+        var dl = ImGui.GetWindowDrawList();
+
+        dl.AddRectFilled(p0, bottomRight,
+            ImGui.GetColorU32(new Vector4(0.07f, 0.07f, 0.10f, 0.80f)), radius);
+
+        ImGui.SetCursorScreenPos(new Vector2(p0.X + 14f, p0.Y + 5f));
+        ImGui.SetNextItemWidth(width - 28f);
+
+        ImGui.PushStyleColor(ImGuiCol.FrameBg, new Vector4(0f, 0f, 0f, 0f));
+        ImGui.PushStyleColor(ImGuiCol.FrameBgHovered, new Vector4(0f, 0f, 0f, 0f));
+        ImGui.PushStyleColor(ImGuiCol.FrameBgActive, new Vector4(0f, 0f, 0f, 0f));
+        ImGui.PushStyleColor(ImGuiCol.Border, new Vector4(0f, 0f, 0f, 0f));
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0f);
+
+        var submit = ImGui.InputTextWithHint(id, hint, ref value, 140, ImGuiInputTextFlags.EnterReturnsTrue);
+        active = ImGui.IsItemActive();
+
+        ImGui.PopStyleVar();
+        ImGui.PopStyleColor(4);
+
+        // 描边最后画：压住输入框的边，聚焦时亮成金色
+        dl.AddRect(p0, bottomRight,
+            ImGui.GetColorU32(chatParked
+                ? new Vector4(0.89f, 0.76f, 0.45f, 0.95f)
+                : new Vector4(0.38f, 0.35f, 0.30f, 0.75f)),
+            radius, 0, chatParked ? 2f : 1.2f);
+
+        // 占位：让后面的 SameLine 从胶囊右边接上
+        ImGui.SetCursorScreenPos(p0);
+        ImGui.Dummy(new Vector2(width, height));
+        return submit;
+    }
+
+    /// <summary>把「键盘归插件」放掉，按键还给游戏。</summary>
+    private void ReleaseChatFocus()
+    {
+        if (!chatParked) return;
+
+        chatParked = false;
+        refocusChat = false;
+        ImGuiP.ClearActiveID();
     }
 
     // -- helpers ----------------------------------------------------------
