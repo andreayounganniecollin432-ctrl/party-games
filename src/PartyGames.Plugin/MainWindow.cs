@@ -29,10 +29,6 @@ public sealed class MainWindow : Window
     private string joinCode = string.Empty;
     private string chatInput = string.Empty;
     private bool refocusChat;
-    private bool chatParked;
-    private bool parkBlocked;
-    private Vector2 chatFieldMin;
-    private Vector2 chatFieldMax;
     private string actionInput = string.Empty;
     private int maxPlayers;
     private string lastAnnounce = string.Empty;
@@ -105,6 +101,9 @@ public sealed class MainWindow : Window
 
     public override void Draw()
     {
+        // 窗口刚打开：光标直接放进聊天框，这样一进来就能打字/回车（只做这一次，不抢焦点）
+        if (ImGui.IsWindowAppearing()) refocusChat = true;
+
         Theme.PushWindowStyle();
         try
         {
@@ -119,16 +118,6 @@ public sealed class MainWindow : Window
     private void DrawInner()
     {
         var client = host.Client;
-
-        // 聊天框按着键盘时，鼠标点到窗口里别的地方（收起 / 关闭 / 出牌…）要先放手：
-        // 否则焦点一直被聊天框占着，那些按钮的「按下」会被抢回去，表现就是点了没反应。
-        if (chatParked && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !IsMouseOverChatField())
-        {
-            ReleaseChatFocus();
-        }
-
-        // 连接页 / 大厅 / 收起状态都没有聊天框：别把键盘一直按着不放
-        if (client.Room is null || collapsed) ReleaseChatFocus();
 
         // 头像每帧同步（玻璃模式下背景不用图，但头像要用）
         artwork.Sync(string.Empty, ResolveAvatarPath() ?? string.Empty);
@@ -1550,70 +1539,41 @@ public sealed class MainWindow : Window
         const float sendWidth = 88f;
         var chatFieldWidth = MathF.Min(MathF.Max(160f, ImGui.GetContentRegionAvail().X - sendWidth - 12f), 520f);
 
-        // —— 键盘归谁 ——
-        // 插件窗口还是活动窗口的时候，就把焦点按在聊天框上。
-        // Dalamud 只在「有 ImGui 输入框正在编辑」（io.WantTextInput）时才把按键从游戏手里截下来，
-        // 所以焦点不在框里时，回车就会直接开游戏自己的聊天输入框——这就是一直没修好的那个问题。
-        // 鼠标点进游戏画面时 Dalamud 会清掉 ImGui 的窗口焦点，我们随即放手，键盘还给游戏。
-        var focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
-        var hovered = ImGui.IsWindowHovered(ImGuiHoveredFlags.RootAndChildWindows |
-                                            ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
-        var editing = ImGui.GetIO().WantTextInput;
-
-        // 有控件正被按着（按钮、滑条…）：这时候绝对不能把焦点往聊天框上抢，
-        // 否则会把别人（收起、关闭、出牌…）那一下按下从手里夺走，按钮就成了「点了没反应」。
-        // 只看「有没有活动控件」，不看鼠标是否按下——右键拖视角时鼠标一直按着，不能因此就不停车。
-        var busy = ImGui.IsAnyItemActive();
-
-        // 在窗口里点一下 = 重新按住；Esc = 交还键盘（不然一直按着，走路都会被吃掉）
-        if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) && hovered) parkBlocked = false;
-
-        if (chatParked && ImGui.IsKeyPressed(ImGuiKey.Escape, false))
+        // 只在「刚发完一句 / 窗口刚打开 / 点了窗口空白处」时把焦点送回输入框。
+        // 这些都是一次性的；绝不能每帧都抢焦点——把焦点一直按在聊天框上会挡住其它控件的点击
+        // （0.6.5.4/0.6.5.5 的收起、关闭、出牌全都点不动就是这么来的）。
+        if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) &&
+            !ImGui.IsAnyItemActive() &&
+            ImGui.IsWindowHovered(ImGuiHoveredFlags.RootAndChildWindows))
         {
-            parkBlocked = true;
-            ReleaseChatFocus();
-        }
-        else if (!focused && !hovered)
-        {
-            // 鼠标已经离开窗口、窗口也不是活动窗口了（点进游戏画面）→ 放手。
-            // 要求两个条件同时成立，避免 Glasswork 内部一帧的焦点抖动就松手。
-            ReleaseChatFocus();
-        }
-        else if (focused && !parkBlocked && !busy && (!editing || ImGui.IsKeyPressed(ImGuiKey.Enter, false)))
-        {
+            // 点到的是窗口空白处（没点中任何控件）：把光标放回聊天框
             refocusChat = true;
         }
 
         bool send;
-        bool active;
 
         if (Theme.Glass)
         {
             if (refocusChat)
             {
-                ImGui.SetKeyboardFocusHere();
                 refocusChat = false;
+                ImGui.SetKeyboardFocusHere();
             }
 
-            send = GlassChatField("##chat", "说点什么…", ref chatInput, chatFieldWidth, out active);
+            send = GlassChatField("##chat", "说点什么…", ref chatInput, chatFieldWidth);
         }
         else
         {
             ImGui.SetNextItemWidth(chatFieldWidth);
             if (refocusChat)
             {
-                ImGui.SetKeyboardFocusHere();
                 refocusChat = false;
+                ImGui.SetKeyboardFocusHere();
             }
 
             send = Ui.InputTextWithHint("##chat", "说点什么…", ref chatInput, 140,
                 ImGuiInputTextFlags.EnterReturnsTrue);
-            active = ImGui.IsItemActive();
-            chatFieldMin = ImGui.GetItemRectMin();
-            chatFieldMax = ImGui.GetItemRectMax();
         }
-
-        chatParked = active;
 
         ImGui.SameLine(0f, 8f);
         if (Theme.PrimaryButton("发送", new Vector2(sendWidth, 0))) send = true;
@@ -1627,19 +1587,16 @@ public sealed class MainWindow : Window
 
     /// <summary>
     /// 玻璃模式下的聊天输入框：胶囊自己画，输入框用原生 ImGui。
-    /// 这里特意不用 Glasswork 的 TextField —— 聊天框必须能被程序按在焦点上
-    /// （回车要落到插件里，而不是游戏自己的聊天框），原生 InputText 的聚焦行为是确定的。
+    /// 不用 Glasswork 的 TextField 是因为它的参数是 (值, 位内占位符, 框外标签)，
+    /// 以前传反了，框里会显示 "##chat"；原生 InputText 也能可靠地 SetKeyboardFocusHere。
     /// </summary>
-    private bool GlassChatField(string id, string hint, ref string value, float width, out bool active)
+    private static bool GlassChatField(string id, string hint, ref string value, float width)
     {
         var p0 = ImGui.GetCursorScreenPos();
         var height = ImGui.GetFrameHeight() + 10f;
         var radius = height * 0.5f;
         var bottomRight = new Vector2(p0.X + width, p0.Y + height);
         var dl = ImGui.GetWindowDrawList();
-
-        chatFieldMin = p0;
-        chatFieldMax = bottomRight;
 
         dl.AddRectFilled(p0, bottomRight,
             ImGui.GetColorU32(new Vector4(0.07f, 0.07f, 0.10f, 0.80f)), radius);
@@ -1654,37 +1611,23 @@ public sealed class MainWindow : Window
         ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0f);
 
         var submit = ImGui.InputTextWithHint(id, hint, ref value, 140, ImGuiInputTextFlags.EnterReturnsTrue);
-        active = ImGui.IsItemActive();
+        var editing = ImGui.IsItemActive();
 
         ImGui.PopStyleVar();
         ImGui.PopStyleColor(4);
 
-        // 描边最后画：压住输入框的边，聚焦时亮成金色
+        // 描边最后画：压住输入框的边，正在打字时亮成金色
         dl.AddRect(p0, bottomRight,
-            ImGui.GetColorU32(chatParked
+            ImGui.GetColorU32(editing
                 ? new Vector4(0.89f, 0.76f, 0.45f, 0.95f)
                 : new Vector4(0.38f, 0.35f, 0.30f, 0.75f)),
-            radius, 0, chatParked ? 2f : 1.2f);
+            radius, 0, editing ? 2f : 1.2f);
 
         // 占位：让后面的 SameLine 从胶囊右边接上
         ImGui.SetCursorScreenPos(p0);
         ImGui.Dummy(new Vector2(width, height));
         return submit;
     }
-
-    /// <summary>把「键盘归插件」放掉，按键还给游戏。</summary>
-    private void ReleaseChatFocus()
-    {
-        if (!chatParked) return;
-
-        chatParked = false;
-        refocusChat = false;
-        ImGuiP.ClearActiveID();
-    }
-
-    /// <summary>鼠标现在是不是停在聊天框上。</summary>
-    private bool IsMouseOverChatField() =>
-        chatFieldMax.X > chatFieldMin.X && ImGui.IsMouseHoveringRect(chatFieldMin, chatFieldMax);
 
     // -- helpers ----------------------------------------------------------
 
