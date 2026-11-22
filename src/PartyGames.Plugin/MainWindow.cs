@@ -31,6 +31,8 @@ public sealed class MainWindow : Window
     private bool refocusChat;
     private bool chatParked;
     private bool parkBlocked;
+    private Vector2 chatFieldMin;
+    private Vector2 chatFieldMax;
     private string actionInput = string.Empty;
     private int maxPlayers;
     private string lastAnnounce = string.Empty;
@@ -117,6 +119,13 @@ public sealed class MainWindow : Window
     private void DrawInner()
     {
         var client = host.Client;
+
+        // 聊天框按着键盘时，鼠标点到窗口里别的地方（收起 / 关闭 / 出牌…）要先放手：
+        // 否则焦点一直被聊天框占着，那些按钮的「按下」会被抢回去，表现就是点了没反应。
+        if (chatParked && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !IsMouseOverChatField())
+        {
+            ReleaseChatFocus();
+        }
 
         // 连接页 / 大厅 / 收起状态都没有聊天框：别把键盘一直按着不放
         if (client.Room is null || collapsed) ReleaseChatFocus();
@@ -1551,6 +1560,11 @@ public sealed class MainWindow : Window
                                             ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
         var editing = ImGui.GetIO().WantTextInput;
 
+        // 有控件正被按着（按钮、滑条…）：这时候绝对不能把焦点往聊天框上抢，
+        // 否则会把别人（收起、关闭、出牌…）那一下按下从手里夺走，按钮就成了「点了没反应」。
+        // 只看「有没有活动控件」，不看鼠标是否按下——右键拖视角时鼠标一直按着，不能因此就不停车。
+        var busy = ImGui.IsAnyItemActive();
+
         // 在窗口里点一下 = 重新按住；Esc = 交还键盘（不然一直按着，走路都会被吃掉）
         if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) && hovered) parkBlocked = false;
 
@@ -1565,7 +1579,7 @@ public sealed class MainWindow : Window
             // 要求两个条件同时成立，避免 Glasswork 内部一帧的焦点抖动就松手。
             ReleaseChatFocus();
         }
-        else if (focused && !parkBlocked && (!editing || ImGui.IsKeyPressed(ImGuiKey.Enter, false)))
+        else if (focused && !parkBlocked && !busy && (!editing || ImGui.IsKeyPressed(ImGuiKey.Enter, false)))
         {
             refocusChat = true;
         }
@@ -1595,6 +1609,8 @@ public sealed class MainWindow : Window
             send = Ui.InputTextWithHint("##chat", "说点什么…", ref chatInput, 140,
                 ImGuiInputTextFlags.EnterReturnsTrue);
             active = ImGui.IsItemActive();
+            chatFieldMin = ImGui.GetItemRectMin();
+            chatFieldMax = ImGui.GetItemRectMax();
         }
 
         chatParked = active;
@@ -1621,6 +1637,9 @@ public sealed class MainWindow : Window
         var radius = height * 0.5f;
         var bottomRight = new Vector2(p0.X + width, p0.Y + height);
         var dl = ImGui.GetWindowDrawList();
+
+        chatFieldMin = p0;
+        chatFieldMax = bottomRight;
 
         dl.AddRectFilled(p0, bottomRight,
             ImGui.GetColorU32(new Vector4(0.07f, 0.07f, 0.10f, 0.80f)), radius);
@@ -1662,6 +1681,10 @@ public sealed class MainWindow : Window
         refocusChat = false;
         ImGuiP.ClearActiveID();
     }
+
+    /// <summary>鼠标现在是不是停在聊天框上。</summary>
+    private bool IsMouseOverChatField() =>
+        chatFieldMax.X > chatFieldMin.X && ImGui.IsMouseHoveringRect(chatFieldMin, chatFieldMax);
 
     // -- helpers ----------------------------------------------------------
 
