@@ -1,12 +1,12 @@
 [
   {
     "Author": "Coral",
-    "Name": "Party Games",
+    "Name": "Coral's Games",
     "Punchline": "在艾欧泽亚开一局文字游戏。",
     "Description": "跨服多人文字游戏平台。房主建房并分享房间码，3-20 人即可开局。",
     "InternalName": "PartyGames",
-    "AssemblyVersion": "0.6.4.0",
-    "TestingAssemblyVersion": "0.6.4.0",
+    "AssemblyVersion": "0.6.5.0",
+    "TestingAssemblyVersion": "0.6.5.0",
     "RepoUrl": "https://github.com/Andreayounganniecollin432-ctrl/party-games",
     "ApplicableVersion": "any",
     "Tags": ["social", "game", "party"],
