@@ -1547,24 +1547,25 @@ public sealed class MainWindow : Window
         // 所以焦点不在框里时，回车就会直接开游戏自己的聊天输入框——这就是一直没修好的那个问题。
         // 鼠标点进游戏画面时 Dalamud 会清掉 ImGui 的窗口焦点，我们随即放手，键盘还给游戏。
         var focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
+        var hovered = ImGui.IsWindowHovered(ImGuiHoveredFlags.RootAndChildWindows |
+                                            ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
         var editing = ImGui.GetIO().WantTextInput;
 
         // 在窗口里点一下 = 重新按住；Esc = 交还键盘（不然一直按着，走路都会被吃掉）
-        var clickedInside = ImGui.IsMouseClicked(ImGuiMouseButton.Left) &&
-                            ImGui.IsWindowHovered(ImGuiHoveredFlags.RootAndChildWindows |
-                                                  ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
-        if (clickedInside) parkBlocked = false;
+        if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) && hovered) parkBlocked = false;
 
         if (chatParked && ImGui.IsKeyPressed(ImGuiKey.Escape, false))
         {
             parkBlocked = true;
             ReleaseChatFocus();
         }
-        else if (!focused)
+        else if (!focused && !hovered)
         {
+            // 鼠标已经离开窗口、窗口也不是活动窗口了（点进游戏画面）→ 放手。
+            // 要求两个条件同时成立，避免 Glasswork 内部一帧的焦点抖动就松手。
             ReleaseChatFocus();
         }
-        else if (!parkBlocked && (!editing || ImGui.IsKeyPressed(ImGuiKey.Enter, false)))
+        else if (focused && !parkBlocked && (!editing || ImGui.IsKeyPressed(ImGuiKey.Enter, false)))
         {
             refocusChat = true;
         }

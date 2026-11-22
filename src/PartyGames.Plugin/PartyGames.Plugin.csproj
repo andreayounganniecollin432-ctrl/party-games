@@ -1,6 +1,6 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.6.5.3</Version>
+    <Version>0.6.5.4</Version>
     <AssemblyName>PartyGames</AssemblyName>
     <RootNamespace>PartyGames</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
