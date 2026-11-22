@@ -29,6 +29,7 @@ public sealed class MainWindow : Window
     private string joinCode = string.Empty;
     private string chatInput = string.Empty;
     private bool refocusChat;
+    private bool windowFocused;
     private string actionInput = string.Empty;
     private int maxPlayers;
     private string lastAnnounce = string.Empty;
@@ -243,6 +244,21 @@ public sealed class MainWindow : Window
             host.Configuration.SyncChatToGame = sync;
             host.Configuration.Save();
         }
+
+        // 提示条停留时间：2-10 秒，改完立刻生效
+        var toastSeconds = Math.Clamp(host.Configuration.ToastSeconds, 2, 10);
+        Theme.PushSliderColors();
+        ImGui.SetNextItemWidth(220f);
+        var toastChanged = SliderInt("屏幕提示停留（秒）", ref toastSeconds, 2, 10);
+        Theme.PopSliderColors();
+        if (toastChanged)
+        {
+            host.Configuration.ToastSeconds = Math.Clamp(toastSeconds, 2, 10);
+            host.Configuration.Save();
+        }
+
+        Theme.Label($"提示条在屏幕顶部停 {toastSeconds} 秒，连发时最多叠 5 条。");
+
         Theme.Section("外观（头像会上传到服务器，房间内所有人都能看到）");
 
         // 头像：点按钮开 Windows 文件对话框，超过 1000×1000 的直接拒绝
@@ -1164,6 +1180,40 @@ public sealed class MainWindow : Window
         }
 
         var tokens = hand!.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        // 叫地主 / 抢地主阶段：这轮没牌可出，只给当前该做决定的人两个按钮，手牌当参考牌摆着
+        var bid = view.Actions.FirstOrDefault(a => a.Kind is "call" or "rob");
+        if (bid is not null)
+        {
+            Theme.Section(bid.Kind == "rob" ? "抢地主" : "叫地主");
+
+            if (Theme.PrimaryButton(bid.Label, new Vector2(132, 0)))
+            {
+                _ = client.SendAsync(Msg.Action, new ActionRequest { Kind = bid.Kind });
+            }
+
+            ImGui.SameLine(0f, 10f);
+            var decline = view.Actions.FirstOrDefault(a => a.Kind == "pass" && a.Enabled);
+            if (decline is not null && Theme.GhostButton(decline.Label, new Vector2(104, 0)))
+            {
+                _ = client.SendAsync(Msg.Action, new ActionRequest { Kind = "pass" });
+            }
+
+            ImGui.SameLine(0f, 10f);
+            Theme.Label(bid.Kind == "rob" ? "抢的人越多倍数越高" : "叫了地主，另外两家还能抢");
+
+            ImGui.Spacing();
+            Theme.Section($"我的手牌（{tokens.Length} 张）");
+            for (var i = 0; i < tokens.Length; i++)
+            {
+                if (i > 0 && i % 7 != 0) ImGui.SameLine(0f, 4f);
+                DrawCardFace(tokens[i]);
+            }
+
+            ImGui.Spacing();
+            return;
+        }
+
         Theme.Section($"选牌（{pickedCards.Count}/{tokens.Length}）");
 
         var cardSize = new Vector2(48, 66);
@@ -1484,6 +1534,21 @@ public sealed class MainWindow : Window
 
     private void DrawChat(IGameClient client)
     {
+        // 回车不能漏到游戏自己的聊天框：
+        // ① 窗口刚变成活动窗口；② 窗口是活动的、又没在编辑别的输入框，这时按回车——
+        // 都把焦点抓回插件聊天框（点过牌面/按钮以后焦点会丢，光靠"发送后置位"挡不住）。
+        var focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
+        if (focused)
+        {
+            var editing = ImGui.GetIO().WantTextInput;
+            if (!windowFocused || (!editing && ImGui.IsKeyPressed(ImGuiKey.Enter, false)))
+            {
+                refocusChat = true;
+            }
+        }
+
+        windowFocused = focused;
+
         const float sendWidth = 88f;
         var chatFieldWidth = MathF.Min(MathF.Max(160f, ImGui.GetContentRegionAvail().X - sendWidth - 12f), 520f);
         ImGui.SetNextItemWidth(chatFieldWidth);

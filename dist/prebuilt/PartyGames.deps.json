@@ -6,12 +6,86 @@
   "compilationOptions": {},
   "targets": {
     ".NETCoreApp,Version=v10.0": {
-      "PartyGames/0.6.2.0": {
+      "PartyGames/0.6.5.2": {
         "dependencies": {
-          "PartyGames.Protocol": "1.0.0"
+          "Glasswork": "0.1.0-beta.5",
+          "Glasswork.Backend": "0.1.0-beta.5",
+          "Glasswork.Dalamud": "0.1.0-beta.5",
+          "Glasswork.Glass": "0.1.0-beta.5",
+          "PartyGames.Protocol": "1.0.0",
+          "System.Drawing.Common": "8.0.0"
         },
         "runtime": {
           "PartyGames.dll": {}
+        }
+      },
+      "Glasswork/0.1.0-beta.5": {
+        "runtime": {
+          "lib/net10.0/Glasswork.dll": {
+            "assemblyVersion": "0.1.0.0",
+            "fileVersion": "0.1.0.0"
+          }
+        }
+      },
+      "Glasswork.Backend/0.1.0-beta.5": {
+        "dependencies": {
+          "Glasswork": "0.1.0-beta.5",
+          "Glasswork.Glass": "0.1.0-beta.5"
+        },
+        "runtime": {
+          "lib/net10.0-windows7.0/Glasswork.Backend.dll": {
+            "assemblyVersion": "0.1.0.0",
+            "fileVersion": "0.1.0.0"
+          }
+        }
+      },
+      "Glasswork.Dalamud/0.1.0-beta.5": {
+        "dependencies": {
+          "Glasswork.Backend": "0.1.0-beta.5"
+        },
+        "runtime": {
+          "lib/net10.0-windows7.0/Glasswork.Dalamud.dll": {
+            "assemblyVersion": "0.1.0.0",
+            "fileVersion": "0.1.0.0"
+          }
+        }
+      },
+      "Glasswork.Glass/0.1.0-beta.5": {
+        "dependencies": {
+          "Glasswork": "0.1.0-beta.5"
+        },
+        "runtime": {
+          "lib/net10.0-windows7.0/Glasswork.Glass.dll": {
+            "assemblyVersion": "0.1.0.0",
+            "fileVersion": "0.1.0.0"
+          }
+        }
+      },
+      "Microsoft.Win32.SystemEvents/8.0.0": {
+        "runtime": {
+          "lib/net8.0/Microsoft.Win32.SystemEvents.dll": {
+            "assemblyVersion": "8.0.0.0",
+            "fileVersion": "8.0.23.53103"
+          }
+        },
+        "runtimeTargets": {
+          "runtimes/win/lib/net8.0/Microsoft.Win32.SystemEvents.dll": {
+            "rid": "win",
+            "assetType": "runtime",
+            "assemblyVersion": "8.0.0.0",
+            "fileVersion": "8.0.23.53103"
+          }
+        }
+      },
+      "System.Drawing.Common/8.0.0": {
+        "dependencies": {
+          "Microsoft.Win32.SystemEvents": "8.0.0"
+        },
+        "runtime": {
+          "lib/net8.0/System.Drawing.Common.dll": {
+            "assemblyVersion": "8.0.0.0",
+            "fileVersion": "8.0.23.53105"
+          }
         }
       },
       "PartyGames.Protocol/1.0.0": {
@@ -25,10 +99,52 @@
     }
   },
   "libraries": {
-    "PartyGames/0.6.2.0": {
+    "PartyGames/0.6.5.2": {
       "type": "project",
       "serviceable": false,
       "sha512": ""
+    },
+    "Glasswork/0.1.0-beta.5": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-Ttts7F4DrubOZDcttYGelGwCBchk5mcdtdSPBFH/uqosJZQiq4YN6uQM2mGjZ4v3bBDJVli5ERTjew9OxG5yww==",
+      "path": "glasswork/0.1.0-beta.5",
+      "hashPath": "glasswork.0.1.0-beta.5.nupkg.sha512"
+    },
+    "Glasswork.Backend/0.1.0-beta.5": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-abgAIo5k0L5gEk2r3bW7fnoVI1Ki9CfGYb9vc/16puyNXpe3DS6UHMfmu8ZfGW2PMmfJ5tbdUJ0218P+LY5C0Q==",
+      "path": "glasswork.backend/0.1.0-beta.5",
+      "hashPath": "glasswork.backend.0.1.0-beta.5.nupkg.sha512"
+    },
+    "Glasswork.Dalamud/0.1.0-beta.5": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-MQ/F036hQx+7TUG1dH/nNC9YIS1EV/lvzgcZaETWs4BKdCEifvZeYeRbfn7fapCAWhJGAOQGKjEQUwXarTSAsw==",
+      "path": "glasswork.dalamud/0.1.0-beta.5",
+      "hashPath": "glasswork.dalamud.0.1.0-beta.5.nupkg.sha512"
+    },
+    "Glasswork.Glass/0.1.0-beta.5": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-tml2W5qq17kVkmk+kgwUvDjC2PqVS/F2bv2RezJiO4R7aGQ7NVEE1u2EYYBSgpVN3VDA+abX3Ux2IjLoFs0MhA==",
+      "path": "glasswork.glass/0.1.0-beta.5",
+      "hashPath": "glasswork.glass.0.1.0-beta.5.nupkg.sha512"
+    },
+    "Microsoft.Win32.SystemEvents/8.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-9opKRyOKMCi2xJ7Bj7kxtZ1r9vbzosMvRrdEhVhDz8j8MoBGgB+WmC94yH839NPH+BclAjtQ/pyagvi/8gDLkw==",
+      "path": "microsoft.win32.systemevents/8.0.0",
+      "hashPath": "microsoft.win32.systemevents.8.0.0.nupkg.sha512"
+    },
+    "System.Drawing.Common/8.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-JkbHJjtI/dWc5dfmEdJlbe3VwgZqCkZRtfuWFh5GOv0f+gGCfBtzMpIVkmdkj2AObO9y+oiOi81UGwH3aBYuqA==",
+      "path": "system.drawing.common/8.0.0",
+      "hashPath": "system.drawing.common.8.0.0.nupkg.sha512"
     },
     "PartyGames.Protocol/1.0.0": {
       "type": "project",

@@ -37,6 +37,9 @@ public sealed class XiangqiGame : IGameModule
     private long _deadline;
     private string _lastMove = string.Empty;
 
+    /// <summary>托管：掉线的一方由服务器代走，棋局不会因为一个人不在而停住。</summary>
+    private readonly bool[] _auto = new bool[2];
+
     private static long Now => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     private static bool IsRed(char c) => char.IsUpper(c);
     private static bool IsBlack(char c) => char.IsLower(c);
@@ -51,6 +54,8 @@ public sealed class XiangqiGame : IGameModule
         _banner = null;
         _turn = 0;
         _lastMove = string.Empty;
+        _quietPlies = 0;
+        Array.Clear(_auto);
         _ids.Clear();
         _names.Clear();
 
@@ -92,7 +97,23 @@ public sealed class XiangqiGame : IGameModule
 
     public void Tick(Room room, long nowMs)
     {
-        if (_finished || nowMs < _deadline) return;
+        if (_finished) return;
+
+        // 双方都托管：没人会回来接着下，判和收场，免得两个人都不在还一直空走
+        if (_auto[0] && _auto[1])
+        {
+            FinishDraw(room, "双方都不在了");
+            return;
+        }
+
+        // 托管的一方轮到就走，不等 60 秒
+        if (_auto[_turn])
+        {
+            TryAutoMove(room);
+            return;
+        }
+
+        if (nowMs < _deadline) return;
         _deadline = Now + 60_000;
         room.Log("system", $"{_names[_turn]} 超时，计时重置。");
         room.SyncAll();
@@ -113,24 +134,29 @@ public sealed class XiangqiGame : IGameModule
         }
 
         if (request.Kind != "move" || side != _turn) return;
+        TryMove(room, side, request.Text);
+    }
 
-        var text = (request.Text ?? string.Empty).Trim();
-        if (text.Length < 4 || !int.TryParse(text, out _)) return;
+    /// <summary>走一步棋（含全部合法性判断、将军/将死/和棋处理）。返回是否真的走了。</summary>
+    private bool TryMove(Room room, int side, string? text)
+    {
+        var raw = (text ?? string.Empty).Trim();
+        if (raw.Length < 4 || !int.TryParse(raw, out _)) return false;
 
-        var r1 = text[0] - '0';
-        var c1 = text[1] - '0';
-        var r2 = text[2] - '0';
-        var c2 = text[3] - '0';
+        var r1 = raw[0] - '0';
+        var c1 = raw[1] - '0';
+        var r2 = raw[2] - '0';
+        var c2 = raw[3] - '0';
 
-        if (!InBounds(r1, c1) || !InBounds(r2, c2)) return;
+        if (!InBounds(r1, c1) || !InBounds(r2, c2)) return false;
 
         var piece = _board[r1, c1];
-        if (piece == '\0') return;
-        if (side == 0 && !IsRed(piece)) return;
-        if (side == 1 && !IsBlack(piece)) return;
+        if (piece == '\0') return false;
+        if (side == 0 && !IsRed(piece)) return false;
+        if (side == 1 && !IsBlack(piece)) return false;
 
-        if (!CanMove(r1, c1, r2, c2)) return;
-        if (!MoveLeavesKingSafe(r1, c1, r2, c2, side)) return;
+        if (!CanMove(r1, c1, r2, c2)) return false;
+        if (!MoveLeavesKingSafe(r1, c1, r2, c2, side)) return false;
 
         var captured = _board[r2, c2];
         _board[r2, c2] = piece;
@@ -144,7 +170,7 @@ public sealed class XiangqiGame : IGameModule
         if (captured == 'k' || captured == 'K')
         {
             Finish(room, side, "擒王");
-            return;
+            return true;
         }
 
         _quietPlies = captured == '\0' ? _quietPlies + 1 : 0;
@@ -154,19 +180,76 @@ public sealed class XiangqiGame : IGameModule
         if (_quietPlies >= QuietPlyLimit)
         {
             FinishDraw(room, "60 回合没吃子");
-            return;
+            return true;
         }
 
         if (!HasAnyLegalMove(_turn))
         {
             var reason = InCheck(_turn) ? "将死" : "无子可走";
             Finish(room, side, reason);
-            return;
+            return true;
         }
 
         if (InCheck(_turn)) room.Log("system", $"{_names[_turn]} 被将军了！");
         room.SyncAll();
+        return true;
     }
+
+    /// <summary>托管走棋：能吃就吃最大的子，没得吃就随便走一步合法的。</summary>
+    private void TryAutoMove(Room room)
+    {
+        var side = _turn;
+        string? best = null;
+        var bestScore = -1;
+
+        for (var r = 0; r < Rows; r++)
+        {
+            for (var c = 0; c < Cols; c++)
+            {
+                var p = _board[r, c];
+                if (p == '\0') continue;
+                if (side == 0 ? !IsRed(p) : !IsBlack(p)) continue;
+
+                for (var tr = 0; tr < Rows; tr++)
+                {
+                    for (var tc = 0; tc < Cols; tc++)
+                    {
+                        if (!CanMove(r, c, tr, tc)) continue;
+                        if (!MoveLeavesKingSafe(r, c, tr, tc, side)) continue;
+
+                        var target = _board[tr, tc];
+                        var score = target == '\0' ? 0 : ValueOf(target) + 1;
+                        if (score <= bestScore) continue;
+
+                        bestScore = score;
+                        best = $"{r}{c}{tr}{tc}";
+                    }
+                }
+            }
+        }
+
+        if (best is null)
+        {
+            Finish(room, 1 - side, "无棋可走（托管）");
+            return;
+        }
+
+        room.Log("system", $"{_names[side]} 在托管，自动走了一步。");
+        TryMove(room, side, best);
+    }
+
+    /// <summary>棋子价值，供托管挑「最划算的一口」。</summary>
+    private static int ValueOf(char p) => char.ToLowerInvariant(p) switch
+    {
+        'k' => 100,
+        'r' => 9,
+        'c' => 5,
+        'n' => 4,
+        'b' => 2,
+        'a' => 2,
+        'p' => 1,
+        _ => 0,
+    };
 
     /// <summary>No capture in <see cref="QuietPlyLimit"/> plies: the game is called a draw, and nobody loses points.</summary>
     private void FinishDraw(Room room, string reason)
@@ -427,6 +510,9 @@ public sealed class XiangqiGame : IGameModule
 
         for (var i = 0; i < _ids.Count; i++)
         {
+            var sub = i == _turn && !_finished ? "该 TA 走" : null;
+            if (_auto[i]) sub = string.IsNullOrEmpty(sub) ? "托管" : sub + " · 托管";
+
             view.Players.Add(new GamePlayerCard
             {
                 Id = _ids[i],
@@ -436,7 +522,7 @@ public sealed class XiangqiGame : IGameModule
                 IsAlive = true,
                 Badge = i == 0 ? "红" : "黑",
                 Accent = i == _turn && !_finished ? "good" : null,
-                Sub = i == _turn && !_finished ? "该 TA 走" : null,
+                Sub = sub,
             });
         }
 
@@ -451,13 +537,35 @@ public sealed class XiangqiGame : IGameModule
         }
         else
         {
-            view.Instruction = $"等 {_names[_turn]} 走棋。";
+            view.Instruction = _auto[_turn]
+                ? $"{_names[_turn]} 在托管，服务器会替他走棋。"
+                : $"等 {_names[_turn]} 走棋。";
         }
 
         return view;
     }
 
-    public void OnPlayerDisconnected(Room room, Player player) { }
+    public void OnPlayerDisconnected(Room room, Player player)
+    {
+        // 掉线保留座位，转身交给托管：轮到他立刻走一步，对手不用干等
+        if (_finished) return;
+
+        var side = MySide(player.Id);
+        if (side < 0) return;
+
+        _auto[side] = true;
+        room.SyncAll();
+    }
+
+    public void OnPlayerReconnected(Room room, Player player)
+    {
+        var side = MySide(player.Id);
+        if (side < 0 || !_auto[side] || _finished) return;
+
+        _auto[side] = false;
+        room.Log("system", $"{player.Name} 回来了，取消托管。");
+        room.SyncAll();
+    }
 
     public void OnPlayerLeft(Room room, Player player)
     {

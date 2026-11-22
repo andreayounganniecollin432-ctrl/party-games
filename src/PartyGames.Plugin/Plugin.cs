@@ -109,6 +109,9 @@ public sealed class Plugin : IDalamudPlugin, IUiHost
 
     private void OnDraw()
     {
+        // 屏幕提示停留时间以设置为准（设置页 2-10 秒）
+        Toasts.Seconds = Configuration.ToastSeconds;
+
         // Drain network frames on the UI thread before drawing anything.
         Client.Pump();
 

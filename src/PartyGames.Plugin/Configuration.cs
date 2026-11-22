@@ -18,6 +18,9 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>语音播报（轮到谁）</summary>
     public bool VoiceEnabled { get; set; } = true;
 
+    /// <summary>屏幕提示停留几秒（2-10），设置页可调。</summary>
+    public int ToastSeconds { get; set; } = 4;
+
     /// <summary>自定义头像图片路径（本地文件），留空用默认色块</summary>
     public string AvatarPath { get; set; } = string.Empty;
 

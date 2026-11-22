@@ -39,11 +39,22 @@ public sealed class DouDizhuGame : IGameModule
     private int _landlord = -1;
     private int _turn;
     private int _bidTurn;
-    private int _multi;              // 倍数：炸弹翻倍
+    private int _bidStarter;         // 第一个被问「叫不叫」的人：两圈都不叫时强制他当地主
+    private int _bidAsked;           // 叫地主阶段已经问过几家
+    private bool _robPhase;          // true = 已经有人叫了，正在「抢地主」
+    private int _robAsked;           // 抢地主阶段已经问过几家
+    private int _caller = -1;        // 叫地主的人
+    private int _robber = -1;        // 最后一次抢地主的人
+    private int _robCount;           // 抢了几次 → 底分倍数
+    private int _multi;              // 倍数：抢地主 + 炸弹
     private bool _bidding = true;
+    private int _redeals;
     private bool _finished;
     private string? _banner;
     private long _deadline;
+
+    /// <summary>托管：掉线的人由服务器代打，牌局不会因为一个人不在而卡住。</summary>
+    private readonly bool[] _auto = new bool[3];
 
     private Combo? _lastCombo;       // 当前需要压过的牌
     private int _lastOwner = -1;
@@ -289,6 +300,14 @@ public sealed class DouDizhuGame : IGameModule
 
     public void Start(Room room)
     {
+        // 谁在托管要跟着人走：重发牌不会让掉线的人变回在线，
+        // 不然重新发牌以后又得一个个等超时。
+        var auto = new HashSet<string>();
+        for (var i = 0; i < _seats.Count && i < _auto.Length; i++)
+        {
+            if (_auto[i]) auto.Add(_seats[i].PlayerId);
+        }
+
         _seats.Clear();
         _finished = false;
         _banner = null;
@@ -297,10 +316,22 @@ public sealed class DouDizhuGame : IGameModule
         _lastCombo = null;
         _lastOwner = -1;
         _bidding = true;
+        _robPhase = false;
+        _caller = -1;
+        _robber = -1;
+        _robCount = 0;
+        _bidAsked = 0;
+        _robAsked = 0;
+        Array.Clear(_auto);
 
         foreach (var player in room.Players.Take(3))
         {
             _seats.Add(new Seat { PlayerId = player.Id, Name = player.Name });
+        }
+
+        for (var i = 0; i < _seats.Count && i < _auto.Length; i++)
+        {
+            _auto[i] = auto.Contains(_seats[i].PlayerId);
         }
 
         if (_seats.Count < 3)
@@ -325,6 +356,7 @@ public sealed class DouDizhuGame : IGameModule
         _bottom = deck.Skip(51).Take(3).ToList();
 
         _bidTurn = _rng.Next(3);
+        _bidStarter = _bidTurn;
         _turn = _bidTurn;
         _deadline = Now + BidMs;
 
@@ -334,33 +366,69 @@ public sealed class DouDizhuGame : IGameModule
 
     public void Tick(Room room, long nowMs)
     {
-        if (_finished || nowMs < _deadline) return;
+        if (_finished) return;
 
-        if (_bidding)
+        // 三家都托管了：没人会回来接着打，直接收场，免得空转到天荒地老
+        var active = 0;
+        for (var i = 0; i < _seats.Count; i++) if (!_auto[i]) active++;
+        if (active == 0)
         {
-            room.Log("system", $"{_seats[_bidTurn].Name} 没吭声，默认不叫。");
-            NextBid(room, false);
+            FinishMatch(room, "三家都托管了，本局结束。", new List<string>());
             return;
         }
 
-        var seat = _seats[_turn];
-        room.Log("system", $"{seat.Name} 超时，自动过牌。");
-        Pass(room, _turn);
+        var who = _bidding ? _bidTurn : _turn;
+        if (who < 0 || who >= _seats.Count) return;
+
+        var auto = _auto[who];
+        if (!auto && nowMs < _deadline) return;
+
+        if (_bidding)
+        {
+            if (!auto) room.Log("system", $"{_seats[who].Name} 没吭声，默认不叫。");
+            BidDecision(room, who, agree: false);
+            return;
+        }
+
+        if (!auto) room.Log("system", $"{_seats[who].Name} 超时，自动过牌。");
+        AutoTurn(room, who);
+    }
+
+    /// <summary>托管/超时：有牌可压就过；自己领出时打最小的单张，保证牌局不会卡死。</summary>
+    private void AutoTurn(Room room, int index)
+    {
+        if (_lastCombo is null && _seats[index].Hand.Count > 0)
+        {
+            var card = _seats[index].Hand.OrderBy(RankOf).First();
+            Play(room, index, RankName(RankOf(card)));
+            return;
+        }
+
+        Pass(room, index);
     }
 
     public void HandleAction(Room room, Player player, ActionRequest request)
     {
         if (_finished) return;
 
-        // 认输：地主认输则农民赢，农民认输则地主赢
+        // 认输：地主认输则农民赢，农民认输则地主赢；叫牌阶段还没定地主，其他人直接赢
         if (request.Kind == "resign")
         {
             var who = _seats.FindIndex(s => s.PlayerId == player.Id);
-            if (who >= 0 && _landlord >= 0)
+            if (who < 0) return;
+
+            room.Log("system", $"{_seats[who].Name} 认输了。");
+
+            if (_landlord >= 0)
             {
-                room.Log("system", $"{_seats[who].Name} 认输了。");
                 Finish(room, who == _landlord ? (_landlord + 1) % 3 : _landlord);
             }
+            else
+            {
+                FinishMatch(room, $"{_seats[who].Name} 认输，本局结束：其他人获胜。",
+                    new List<string> { player.Id }, "认输的人");
+            }
+
             return;
         }
 
@@ -371,8 +439,16 @@ public sealed class DouDizhuGame : IGameModule
         {
             if (index != _bidTurn) return;
 
-            if (request.Kind == "call") { BecomeLandlord(room, index); return; }
-            if (request.Kind == "pass") { NextBid(room, false); return; }
+            // 叫地主阶段只认「叫 / 不叫」，抢地主阶段只认「抢 / 不抢」
+            if (!_robPhase)
+            {
+                if (request.Kind == "call") BidDecision(room, index, agree: true);
+                else if (request.Kind == "pass") BidDecision(room, index, agree: false);
+                return;
+            }
+
+            if (request.Kind == "rob") BidDecision(room, index, agree: true);
+            else if (request.Kind == "pass") BidDecision(room, index, agree: false);
             return;
         }
 
@@ -389,27 +465,86 @@ public sealed class DouDizhuGame : IGameModule
         }
     }
 
-    private void NextBid(Room room, bool called)
+    /// <summary>
+    /// 叫地主 / 抢地主共用一条流程：
+    /// 先绕一圈问「叫不叫」，第一个叫的人定下来之后，其余两家依次问「抢不抢」。
+    /// 每家最多抢一次，最后抢的人当地主；一次没抢就是叫的人当地主。
+    /// </summary>
+    private void BidDecision(Room room, int index, bool agree)
     {
-        if (called) return;
-
-        _bidTurn = (_bidTurn + 1) % 3;
-        if (_bidTurn == _turn)
+        if (!_robPhase)
         {
-            // 一圈都不叫，重新发牌
-            room.Log("system", "三家都不叫，重新发牌。");
-            Start(room);
+            if (agree)
+            {
+                _caller = index;
+                _robPhase = true;
+                _robAsked = 0;
+                _bidTurn = (index + 1) % 3;
+                _deadline = Now + BidMs;
+                room.Log("result", $"{_seats[index].Name} 叫地主，另外两家可以抢。");
+                room.SyncAll();
+                return;
+            }
+
+            _bidAsked++;
+            room.Log("system", $"{_seats[index].Name} 不叫。");
+
+            if (_bidAsked >= _seats.Count)
+            {
+                _redeals++;
+                if (_redeals >= 2)
+                {
+                    // 连续两圈没人叫，强制第一家当地主，避免无限重发
+                    room.Log("system", "三家都不叫，强制地主。");
+                    FinalizeLandlord(room, _bidStarter);
+                    return;
+                }
+
+                room.Log("system", "三家都不叫，重新发牌。");
+                Start(room);
+                return;
+            }
+
+            _bidTurn = (index + 1) % _seats.Count;
+            _deadline = Now + BidMs;
+            room.SyncAll();
             return;
         }
 
+        // 抢地主：agree = 抢，否则不抢
+        if (agree)
+        {
+            _robber = index;
+            _robCount++;
+            room.Log("result", $"{_seats[index].Name} 抢地主！（{_robCount} 抢 → {1 + _robCount} 倍）");
+        }
+        else
+        {
+            room.Log("system", $"{_seats[index].Name} 不抢。");
+        }
+
+        _robAsked++;
+        if (_robAsked >= Math.Max(0, _seats.Count - 1))
+        {
+            FinalizeLandlord(room);
+            return;
+        }
+
+        _bidTurn = (index + 1) % _seats.Count;
         _deadline = Now + BidMs;
         room.SyncAll();
     }
 
-    private void BecomeLandlord(Room room, int index)
+    /// <summary>定地主：抢过就是最后抢的人，没人抢就是叫的人，两圈没人叫就是被指定的那家。</summary>
+    private void FinalizeLandlord(Room room, int? forced = null)
     {
+        var index = forced ?? (_robber >= 0 ? _robber : _caller);
+        if (index < 0 || index >= _seats.Count) index = 0;
+
         _bidding = false;
+        _robPhase = false;
         _landlord = index;
+        _multi = 1 + _robCount;
         _seats[index].Hand.AddRange(_bottom);
         _seats[index].Hand = _seats[index].Hand.OrderBy(c => c).ToList();
 
@@ -418,7 +553,13 @@ public sealed class DouDizhuGame : IGameModule
         _lastOwner = -1;
         _deadline = Now + TurnMs;
 
-        room.Log("result", $"{_seats[index].Name} 叫了地主，拿走三张底牌（{HandText(_bottom)}），开始出牌。");
+        var how = forced is not null
+            ? "被指定为地主"
+            : _robCount > 0
+                ? $"抢到地主（抢 {_robCount} 次，{_multi} 倍）"
+                : $"叫了地主（{_multi} 倍）";
+
+        room.Log("result", $"{_seats[index].Name} {how}，拿走三张底牌（{HandText(_bottom)}），开始出牌。");
         room.SyncAll();
     }
 
@@ -564,17 +705,42 @@ public sealed class DouDizhuGame : IGameModule
         room.SyncAll();
     }
 
+    /// <summary>整局收场（有人走掉 / 认输 / 全员托管），只结算 <paramref name="losingIds"/> 的积分。</summary>
+    private void FinishMatch(Room room, string banner, List<string> losingIds, string? losingSide = null)
+    {
+        _finished = true;
+        _banner = banner;
+        room.Log("result", banner);
+
+        room.Finish(new GameOutcome
+        {
+            Banner = banner,
+            LosingSide = losingSide,
+            LosingPlayerIds = losingIds,
+        });
+
+        room.SyncAll();
+    }
+
     public GameView BuildView(Room room, Player viewer)
     {
         var me = _seats.FirstOrDefault(s => s.PlayerId == viewer.Id);
+        var meIndex = me is null ? -1 : _seats.IndexOf(me);
+        var myTurn = !_bidding && meIndex >= 0 && meIndex == _turn;
+
+        string SeatName(int index) =>
+            index >= 0 && index < _seats.Count ? _seats[index].Name : "?";
+
+        var subtitle = _finished
+            ? "本局结束"
+            : _bidding
+                ? (_robPhase ? $"抢地主：{SeatName(_bidTurn)}" : $"叫地主：{SeatName(_bidTurn)}")
+                : $"轮到 {SeatName(_turn)}（{_multi} 倍）";
+
         var view = new GameView
         {
             Title = "斗地主",
-            Subtitle = _finished
-                ? "本局结束"
-                : _bidding
-                    ? $"叫地主：{_seats[Math.Clamp(_bidTurn, 0, _seats.Count - 1)].Name}"
-                    : $"轮到 {_seats[Math.Clamp(_turn, 0, _seats.Count - 1)].Name}",
+            Subtitle = subtitle,
             DeadlineAtMs = _finished ? null : _deadline,
             ResultBanner = _finished ? _banner : null,
         };
@@ -591,21 +757,26 @@ public sealed class DouDizhuGame : IGameModule
         }
         else if (_bidding)
         {
-            view.Instruction = me is not null && _seats.IndexOf(me) == _bidTurn
-                ? "轮到你叫地主了。"
-                : $"等 {_seats[_bidTurn].Name} 决定叫不叫。";
+            var mine = meIndex == _bidTurn;
+            view.Instruction = _robPhase
+                ? mine
+                    ? $"轮到你抢地主（现在 {1 + _robCount} 倍，你抢了就翻倍）。"
+                    : $"有人叫了地主，等 {SeatName(_bidTurn)} 决定抢不抢。"
+                : mine
+                    ? "轮到你叫地主了。"
+                    : $"等 {SeatName(_bidTurn)} 决定叫不叫。";
         }
         else
         {
             var tail = _lastCombo is not null && _lastOwner >= 0
-                ? $"桌面：{_seats[_lastOwner].Name} 的{TypeName(_lastCombo)}"
+                ? $"桌面：{SeatName(_lastOwner)} 的{TypeName(_lastCombo)}"
                 : "桌面空着，可以先出任意牌型";
 
-            view.Instruction = me is not null && _seats.IndexOf(me) == _turn
+            view.Instruction = myTurn
                 ? $"轮到你出牌。{tail}"
-                : $"等 {_seats[_turn].Name} 出牌。{tail}";
+                : $"等 {SeatName(_turn)} 出牌。{tail}";
 
-            if (me is not null && _seats.IndexOf(me) == _turn)
+            if (myTurn)
             {
                 view.AcceptsText = true;
                 view.TextHint = "输入要出的牌，如 334455 / 34567 / 大王";
@@ -623,7 +794,7 @@ public sealed class DouDizhuGame : IGameModule
                 IsYou = seat.PlayerId == viewer.Id,
                 IsHost = seat.PlayerId == room.HostId,
                 IsAlive = true,
-                Sub = $"剩 {seat.Hand.Count} 张",
+                Sub = _auto[i] ? $"剩 {seat.Hand.Count} 张 · 托管" : $"剩 {seat.Hand.Count} 张",
             };
 
             if (i == _landlord)
@@ -645,18 +816,24 @@ public sealed class DouDizhuGame : IGameModule
             view.Players.Add(card);
         }
 
-        if (!_finished)
+        // 叫地主 / 抢地主：按钮只发给「当前该做决定的那家」
+        if (!_finished && _bidding && meIndex == _bidTurn)
         {
-            if (_bidding && me is not null && _seats.IndexOf(me) == _bidTurn)
+            if (_robPhase)
+            {
+                view.Actions.Add(new GameAction { Kind = "rob", Label = "抢地主" });
+                view.Actions.Add(new GameAction { Kind = "pass", Label = "不抢" });
+            }
+            else
             {
                 view.Actions.Add(new GameAction { Kind = "call", Label = "叫地主" });
                 view.Actions.Add(new GameAction { Kind = "pass", Label = "不叫" });
             }
-            else if (!_bidding && me is not null && _seats.IndexOf(me) == _turn)
-            {
-                if (_lastCombo is not null && _lastOwner >= 0)
-                    view.Actions.Add(new GameAction { Kind = "pass", Label = "要不起" });
-            }
+        }
+
+        if (!_finished && !_bidding && myTurn && _lastCombo is not null && _lastOwner >= 0)
+        {
+            view.Actions.Add(new GameAction { Kind = "pass", Label = "要不起" });
         }
 
         if (_finished && viewer.Id == room.HostId)
@@ -669,7 +846,24 @@ public sealed class DouDizhuGame : IGameModule
 
     public void OnPlayerDisconnected(Room room, Player player)
     {
-        // 掉线就等超时自动过牌
+        // 掉线保留座位，转身交给托管：轮到他就立刻替他过牌，其他人不用干等 45 秒
+        if (_finished) return;
+
+        var index = _seats.FindIndex(s => s.PlayerId == player.Id);
+        if (index < 0) return;
+
+        _auto[index] = true;
+        room.SyncAll();
+    }
+
+    public void OnPlayerReconnected(Room room, Player player)
+    {
+        var index = _seats.FindIndex(s => s.PlayerId == player.Id);
+        if (index < 0 || !_auto[index] || _finished) return;
+
+        _auto[index] = false;
+        room.Log("system", $"{player.Name} 回来了，取消托管。");
+        room.SyncAll();
     }
 
     public void OnPlayerLeft(Room room, Player player)
@@ -679,9 +873,12 @@ public sealed class DouDizhuGame : IGameModule
         var index = _seats.FindIndex(s => s.PlayerId == player.Id);
         if (index < 0) return;
 
-        _finished = true;
-        _banner = $"{player.Name} 离开了，本局作废。";
-        room.Log("system", _banner);
-        room.SyncAll();
+        // 斗地主得三家齐：走一个就打不下去，直接收场，剩下的人赢
+        _auto[index] = true;
+        if (_seats.Count - 1 < MinPlayers)
+        {
+            FinishMatch(room, $"{player.Name} 直接离开了，本局结束：剩下的人获胜。",
+                new List<string> { player.Id }, "离开的人");
+        }
     }
 }

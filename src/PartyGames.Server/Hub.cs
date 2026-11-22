@@ -32,6 +32,9 @@ public sealed class Hub : IHostedService
     /// <summary>512 KB 的 base64 上限（约 380 KB 原图），够一张 256px 头像。</summary>
     private const int MaxAvatarChars = 512 * 1024;
 
+    /// <summary>空房间最多留这么多，防止 48 小时保留期把内存吃光。</summary>
+    private const int MaxIdleRooms = 300;
+
     private Timer? _timer;
     private int _tickCount;
 
@@ -127,6 +130,8 @@ public sealed class Hub : IHostedService
                     _logger.LogInformation("room {Code} expired", room.Code);
                 }
             }
+
+            TrimEmptyRooms();
 
             RefreshStats();
 
@@ -317,7 +322,12 @@ public sealed class Hub : IHostedService
             {
                 room.Rebind(player, connection);
                 room.Log("system", $"{player.Name} 重新连接了。");
-                room.Sync(player);
+
+                // 重连要把聊天记录和所有人的头像一起补回来，否则满屏名字首字
+                room.Sync(player, includeHistory: true);
+
+                // 其他玩家也要刷新一次，才能把「托管」标记撤掉
+                room.SyncAll();
                 notice = $"已回到房间 {room.Code}（{room.GameName}）";
             }
         }
@@ -550,6 +560,28 @@ public sealed class Hub : IHostedService
 
     private Room? ConnectionRoom(Connection connection) =>
         connection.RoomCode is not null && _rooms.TryGetValue(connection.RoomCode, out var room) ? room : null;
+
+    /// <summary>
+    /// 空房间要留 48 小时（聊天记录在里面），但也不能无限堆，
+    /// 超过上限就先淘汰最久没人活动的那几个。
+    /// </summary>
+    private void TrimEmptyRooms()
+    {
+        if (_rooms.Count <= MaxIdleRooms) return;
+
+        var idle = _rooms.Values
+            .Where(room => room.Players.Count == 0 &&
+                           !string.Equals(room.Code, LobbyCode, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(room => room.LastActivityMs)
+            .Take(_rooms.Count - MaxIdleRooms)
+            .ToList();
+
+        foreach (var room in idle)
+        {
+            _rooms.Remove(room.Code);
+            _logger.LogInformation("room {Code} trimmed (too many idle rooms)", room.Code);
+        }
+    }
 
     private string NewRoomCode()
     {

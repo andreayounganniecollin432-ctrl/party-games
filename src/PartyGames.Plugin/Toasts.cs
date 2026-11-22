@@ -4,7 +4,7 @@ using Dalamud.Bindings.ImGui;
 namespace PartyGames;
 
 /// <summary>
-/// 屏幕顶部的轻提示：新消息飘一条，3 秒后淡出。
+/// 屏幕顶部的轻提示：新消息飘一条，停留几秒后淡出（秒数在设置里调）。
 /// 不写聊天框、不占焦点、不影响操作。
 /// </summary>
 internal static class Toasts
@@ -13,15 +13,23 @@ internal static class Toasts
     {
         public string Text = string.Empty;
         public DateTime Until;
+        public double LifeMs;
     }
 
     private static readonly List<Item> Items = new();
-    private const double LifeMs = 3200;
+
+    /// <summary>停留秒数；由配置每帧同步过来（2-10 秒）。</summary>
+    public static int Seconds { get; set; } = 4;
+
+    /// <summary>实际的停留毫秒数，越界会被夹住。</summary>
+    private static double LifeMs => Math.Clamp(Seconds, 2, 10) * 1000.0;
 
     public static void Push(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
-        Items.Add(new Item { Text = text, Until = DateTime.UtcNow.AddMilliseconds(LifeMs) });
+
+        var life = LifeMs;
+        Items.Add(new Item { Text = text, Until = DateTime.UtcNow.AddMilliseconds(life), LifeMs = life });
         if (Items.Count > 5) Items.RemoveAt(0);
     }
 
@@ -41,7 +49,8 @@ internal static class Toasts
 
         foreach (var item in Items)
         {
-            var left = (float)(item.Until - now).TotalMilliseconds / (float)LifeMs;
+            // 每条按自己出生时的停留时间算淡出，中途改设置也不会闪
+            var left = (float)(item.Until - now).TotalMilliseconds / (float)item.LifeMs;
             var alpha = Math.Clamp(left * 2.2f, 0f, 1f);
 
             var size = ImGui.CalcTextSize(item.Text);

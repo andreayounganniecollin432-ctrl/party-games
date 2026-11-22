@@ -10,32 +10,58 @@ using Dalamud.Plugin.Services;
 namespace PartyGames;
 
 /// <summary>
-/// 别人的头像：把服务端转发的 base64 变成贴图，按玩家 id 缓存。
-/// 贴图创建是异步的，没就绪的那几帧退回首字圆——所以列表不会因为等图而卡住。
+/// 别人的头像：把服务端转发的 base64 变成贴图，按玩家 id 长期缓存。
+///
+/// 以前是「谁不在 client.Avatars 里就把贴图丢掉」，重连/换房间的那几帧列表是空的，
+/// 头像就被清掉，只能退回首字。现在缓存不跟着房间走：贴图留着，解码失败还会退避重试。
 /// </summary>
 internal sealed class RemoteAvatars : IDisposable
 {
+    /// <summary>最多缓存多少个人的头像，超了先淘汰最久没出现的（房间里的人不淘汰）。</summary>
+    private const int MaxEntries = 64;
+
+    /// <summary>解码失败最多试几次。</summary>
+    private const int MaxAttempts = 3;
+
     private sealed class Entry
     {
         public string Base64 = string.Empty;
         public IDalamudTextureWrap? Texture;
+        public int Attempts;
+        public long NextTryAtMs;
         public bool Loading;
     }
 
     private readonly Dictionary<string, Entry> entries = new();
+    private readonly Dictionary<string, long> lastSeenMs = new();
 
-    /// <summary>Picks up whatever the client has; starts a decode for anything new or changed.</summary>
+    /// <summary>Picks up whatever the client has; starts a decode for anything new or changed, retries failures.</summary>
     public void Sync(IGameClient client, ITextureProvider? textures)
     {
+        var now = Environment.TickCount64;
+
         foreach (var (id, base64) in client.Avatars)
         {
-            if (entries.TryGetValue(id, out var existing) && existing.Base64 == base64)
+            lastSeenMs[id] = now;
+
+            if (!entries.TryGetValue(id, out var entry) || entry.Base64 != base64)
+            {
+                // 新头像（或者换了图）：重新解码
+                entry = new Entry { Base64 = base64 };
+                entries[id] = entry;
+            }
+            else if (entry.Texture is not null || entry.Loading)
             {
                 continue;
             }
+            else if (entry.Attempts >= MaxAttempts || now < entry.NextTryAtMs)
+            {
+                // 失败过：还在退避期里，或者已经放弃了
+                continue;
+            }
 
-            var entry = new Entry { Base64 = base64 };
-            entries[id] = entry;
+            entry.Attempts++;
+            entry.NextTryAtMs = now + 1500 * entry.Attempts;
 
             if (textures is not null)
             {
@@ -43,15 +69,26 @@ internal sealed class RemoteAvatars : IDisposable
             }
         }
 
-        // 离开房间的玩家：把贴图丢掉
-        if (entries.Count > client.Avatars.Count)
+        if (entries.Count > MaxEntries) Trim(client.Avatars);
+    }
+
+    /// <summary>缓存不跟着房间走，只在容量超标时淘汰最久没出现的人。</summary>
+    private void Trim(IReadOnlyDictionary<string, string> current)
+    {
+        var stale = new List<string>(entries.Keys);
+        stale.Sort((a, b) => Seen(a).CompareTo(Seen(b)));
+
+        foreach (var id in stale)
         {
-            foreach (var id in new List<string>(entries.Keys))
-            {
-                if (!client.Avatars.ContainsKey(id)) entries.Remove(id);
-            }
+            if (entries.Count <= MaxEntries) break;
+            if (current.ContainsKey(id)) continue;   // 当前房间里的人一个都不动
+
+            entries.Remove(id);
+            lastSeenMs.Remove(id);
         }
     }
+
+    private long Seen(string id) => lastSeenMs.TryGetValue(id, out var seen) ? seen : 0;
 
     private static async Task LoadAsync(Entry entry, string base64, ITextureProvider textures)
     {
@@ -61,11 +98,14 @@ internal sealed class RemoteAvatars : IDisposable
         try
         {
             var bytes = Convert.FromBase64String(base64);
-            entry.Texture = await textures.CreateFromImageAsync(bytes, "PartyGames avatar", CancellationToken.None);
+            var texture = await textures.CreateFromImageAsync(bytes, "PartyGames avatar", CancellationToken.None);
+
+            // 解码期间可能换了图：只有还是同一张才收下
+            if (entry.Base64 == base64) entry.Texture = texture;
         }
         catch
         {
-            // 图片坏了/格式不支持：保持首字圆兜底
+            // 图片坏了/格式不支持：保持首字圆兜底，Sync 里按退避再试（最多 3 次）
             entry.Texture = null;
         }
         finally
@@ -84,6 +124,7 @@ internal sealed class RemoteAvatars : IDisposable
     public void Dispose()
     {
         entries.Clear();
+        lastSeenMs.Clear();
     }
 }
 

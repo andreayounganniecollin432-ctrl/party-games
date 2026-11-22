@@ -60,6 +60,12 @@ public interface IGameModule
     void OnPlayerDisconnected(Room room, Player player);
     void OnPlayerLeft(Room room, Player player);
 
+    /// <summary>
+    /// The player took their seat back after a disconnect. Games that hand a
+    /// missing player over to 托管 use this to hand control back.
+    /// </summary>
+    void OnPlayerReconnected(Room room, Player player) { }
+
     GameDescriptor Describe() => new()
     {
         Id = Id,

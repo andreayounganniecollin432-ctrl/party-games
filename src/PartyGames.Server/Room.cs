@@ -30,7 +30,12 @@ public sealed class Room
 {
     private const int BacklogLimit = 200;
     private const long OfflineGraceMs = 120_000;
-    private const long EmptyRoomTtlMs = 300_000;
+
+    /// <summary>
+    /// 空房间保留 48 小时：人走光了也不立刻销毁，房间里的聊天记录还在，
+    /// 拿到房间码的朋友第二天回来还能接着聊。
+    /// </summary>
+    private const long EmptyRoomTtlMs = 48 * 60 * 60 * 1000;
 
     private readonly List<RoomEvent> _backlog = new();
 
@@ -128,6 +133,9 @@ public sealed class Room
         conn.RoomCode = Code;
         conn.PlayerId = player.Id;
         LastActivityMs = Now;
+
+        // 对局中的游戏要撤掉「托管」，把操作权还给他
+        Game?.OnPlayerReconnected(this, player);
     }
 
     public void RemovePlayer(string playerId)
@@ -163,7 +171,9 @@ public sealed class Room
 
         player.Conn = null;
         player.OfflineSinceMs = Now;
-        Log("system", $"{player.Name} 掉线了，座位保留 2 分钟。");
+        Log("system", Phase == RoomPhase.Playing
+            ? $"{player.Name} 掉线了，先交给托管（重连可收回座位）。"
+            : $"{player.Name} 掉线了，座位保留 2 分钟。");
         Game?.OnPlayerDisconnected(this, player);
         SyncAll();
     }
@@ -505,14 +515,15 @@ public sealed class Room
 
     public void Tick(long nowMs)
     {
-        if (Phase == RoomPhase.Lobby)
-        {
-            var stale = Players
-                .Where(p => !p.IsOnline && p.OfflineSinceMs is { } since && nowMs - since > OfflineGraceMs)
-                .ToList();
+        // 掉线超过 2 分钟还没回来：座位直接请出去。
+        // 对局中这一下会走 OnPlayerLeft —— 斗地主 / 象棋会立刻收场、剩下的人赢，
+        // 不会出现"一个人挂在座位上，整局 45 秒一回合地空转"的死循环。
+        // 这 2 分钟里游戏自己的托管会替他把该走的棋/牌走掉，其他人不用干等。
+        var stale = Players
+            .Where(p => !p.IsOnline && p.OfflineSinceMs is { } since && nowMs - since > OfflineGraceMs)
+            .ToList();
 
-            foreach (var player in stale) RemovePlayer(player.Id);
-        }
+        foreach (var player in stale) RemovePlayer(player.Id);
 
         Game?.Tick(this, nowMs);
         Bots.Drive(this, nowMs);
@@ -551,9 +562,10 @@ public sealed class Room
         }
     }
 
-    public void Sync(Player player)
+    public void Sync(Player player, bool includeHistory = false)
     {
-        if (player.Conn is { IsClosed: false } conn) conn.Send(Envelope.Of(Msg.Room, BuildSnapshot(player)));
+        if (player.Conn is { IsClosed: false } conn)
+            conn.Send(Envelope.Of(Msg.Room, BuildSnapshot(player, includeBacklog: includeHistory)));
     }
 
     public RoomSnapshot BuildSnapshot(Player viewer, bool includeBacklog = false)
