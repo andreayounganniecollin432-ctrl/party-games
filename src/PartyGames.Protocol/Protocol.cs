@@ -30,6 +30,9 @@ public static class Msg
     public const string Chat = "chat";
     public const string Ping = "ping";
 
+    /// <summary>客户端上传自己的头像（base64）。</summary>
+    public const string Avatar = "avatar";
+
     // server -> client
     public const string Welcome = "welcome";
     public const string Status = "status";
@@ -123,6 +126,19 @@ public sealed class PingRequest
     public long ClientTimeMs { get; set; }
 }
 
+/// <summary>Our own avatar, as a base64 image (PNG/JPEG). Sent once when we enter a room.</summary>
+public sealed class AvatarUploadRequest
+{
+    public string ImageBase64 { get; set; } = string.Empty;
+}
+
+/// <summary>Someone's avatar, relayed by the server. A null image means it was cleared.</summary>
+public sealed class AvatarMessage
+{
+    public string PlayerId { get; set; } = string.Empty;
+    public string? ImageBase64 { get; set; }
+}
+
 // ---------------------------------------------------------------------------
 // server -> client payloads
 // ---------------------------------------------------------------------------
@@ -198,6 +214,9 @@ public sealed class RoomSnapshot
 
     /// <summary>Recent history, only filled in on join so a reconnecting client has context.</summary>
     public List<RoomEvent>? Backlog { get; set; }
+
+    /// <summary>Everybody's avatar, only filled in on join (the same reason as <see cref="Backlog"/>).</summary>
+    public List<AvatarMessage>? Avatars { get; set; }
 }
 
 public static class RoomPhase
@@ -287,6 +306,9 @@ public sealed class GamePlayerCard
     public string? Badge { get; set; }
     public string? Sub { get; set; }
     public string? Accent { get; set; } // good | bad | warn | None
+
+    /// <summary>Whether this player uploaded an avatar; the image itself comes in <see cref="RoomSnapshot.Avatars"/>.</summary>
+    public bool HasAvatar { get; set; }
 }
 
 public sealed class GameAction

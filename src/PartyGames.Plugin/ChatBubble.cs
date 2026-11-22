@@ -1,5 +1,6 @@
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Textures.TextureWraps;
 
 namespace PartyGames;
 
@@ -20,7 +21,7 @@ internal static class ChatBubble
     private const float PadY = 6f;
 
     /// <summary>画一条聊天。返回占用高度。</summary>
-    public static float Draw(string speaker, string text, string clock)
+    public static float Draw(string speaker, string text, string clock, Artwork? artwork = null, IDalamudTextureWrap? avatar = null, bool isYou = false)
     {
         var dl = ImGui.GetWindowDrawList();
         var origin = ImGui.GetCursorScreenPos();
@@ -43,26 +44,8 @@ internal static class ChatBubble
         var avatarMin = new Vector2(origin.X, rowTop);
         var avatarMax = avatarMin + new Vector2(AvatarSize, AvatarSize);
         {
-            // 首字头像：按名字散列取色，亮字 + 深色描边，保证任何底色都看得清
-            var colors = new[]
-            {
-                new Vector4(0.85f, 0.66f, 0.36f, 1f),
-                new Vector4(0.47f, 0.66f, 0.82f, 1f),
-                new Vector4(0.76f, 0.55f, 0.66f, 1f),
-                new Vector4(0.48f, 0.74f, 0.62f, 1f),
-                new Vector4(0.80f, 0.70f, 0.45f, 1f),
-                new Vector4(0.65f, 0.60f, 0.82f, 1f),
-            };
-            var seed = string.IsNullOrEmpty(speaker) ? 0 : Math.Abs(speaker[0]) % colors.Length;
-            var center = new Vector2(avatarMin.X + AvatarSize / 2, rowTop + AvatarSize / 2);
-            dl.AddCircleFilled(center, AvatarSize / 2, ImGui.GetColorU32(colors[seed]), 24);
-            dl.AddCircle(center, AvatarSize / 2, ImGui.GetColorU32(new Vector4(0.10f, 0.09f, 0.07f, 0.9f)), 24, 1.5f);
-
-            var initial = string.IsNullOrEmpty(speaker) ? "?" : speaker[..1];
-            var textSize = ImGui.CalcTextSize(initial);
-            var pos = new Vector2(center.X - textSize.X / 2, center.Y - textSize.Y / 2);
-            dl.AddText(pos + new Vector2(1, 1), ImGui.GetColorU32(new Vector4(0.08f, 0.07f, 0.06f, 1f)), initial);
-            dl.AddText(pos, ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 1f)), initial);
+            // 和玩家列表共用一套头像：自己用自定义图，别人用远端图，都没有就首字
+            Avatars.Draw(dl, artwork, avatarMin, AvatarSize, speaker, isYou, 1f, avatar);
         }
 
         // 昵称（小字，气泡上方）

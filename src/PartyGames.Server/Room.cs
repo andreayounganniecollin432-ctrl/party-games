@@ -12,7 +12,14 @@ public sealed class Player
     public bool IsReady { get; set; }
     public long JoinedAtMs { get; init; } = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     public long? OfflineSinceMs { get; set; }
-    public bool IsOnline => Conn is { IsClosed: false };
+
+    /// <summary>Seats filled by the server instead of a client, for solo testing.</summary>
+    public bool IsBot { get; init; }
+
+    /// <summary>Base64 头像（PNG/JPEG），没传过就是 null。</summary>
+    public string? AvatarBase64 { get; set; }
+
+    public bool IsOnline => IsBot || Conn is { IsClosed: false };
 }
 
 /// <summary>
@@ -136,7 +143,7 @@ public sealed class Room
 
         if (HostId == playerId)
         {
-            var next = Players.FirstOrDefault(p => p.IsOnline) ?? Players.FirstOrDefault();
+            var next = Players.FirstOrDefault(p => p.IsOnline && !p.IsBot) ?? Players.FirstOrDefault(p => p.IsOnline);
             HostId = next?.Id ?? string.Empty;
             if (next is not null) Log("system", $"{next.Name} 成为新房主。");
         }
@@ -160,6 +167,63 @@ public sealed class Room
         Game?.OnPlayerDisconnected(this, player);
         SyncAll();
     }
+
+    // -- bots --------------------------------------------------------------
+
+    private readonly Dictionary<string, long> _botTurns = new();
+
+    /// <summary>How many seats the host asked to fill with bots.</summary>
+    public int BotTarget { get; private set; }
+
+    public void SetBotCount(int count)
+    {
+        BotTarget = Math.Clamp(count, 0, Math.Max(0, MaxPlayers - 1));
+        UpdateBots();
+    }
+
+    /// <summary>Adds or drops bot seats so the room matches <see cref="BotTarget"/>; lobby only.</summary>
+    private void UpdateBots()
+    {
+        if (Phase != RoomPhase.Lobby || Game is not null) return;
+
+        var bots = Players.Where(p => p.IsBot).ToList();
+        var humans = Players.Count - bots.Count;
+        var want = Math.Min(BotTarget, Math.Max(0, MaxPlayers - humans));
+
+        while (bots.Count > want)
+        {
+            var bot = bots[^1];
+            bots.RemoveAt(bots.Count - 1);
+            Players.Remove(bot);
+            _botTurns.Remove(bot.Id);
+        }
+
+        while (bots.Count < want)
+        {
+            var bot = new Player
+            {
+                Id = "bot-" + Guid.NewGuid().ToString("N")[..8],
+                Name = Bots.NameFor(bots.Count),
+                IsBot = true,
+                IsReady = true,
+            };
+
+            Players.Add(bot);
+            bots.Add(bot);
+        }
+
+        if (want > 0) Log("system", $"机器人已就位：{want} 个。");
+        SyncAll();
+    }
+
+    /// <summary>True when this bot may decide again; also hands back how long it will wait afterwards.</summary>
+    public bool TryTakeBotTurn(string botId, long nowMs, out int delay)
+    {
+        delay = Bots.NextDelay();
+        return !_botTurns.TryGetValue(botId, out var next) || nowMs >= next;
+    }
+
+    public void SetBotTurn(string botId, long nextAtMs) => _botTurns[botId] = nextAtMs;
 
     public void SetReady(string playerId, bool ready)
     {
@@ -328,7 +392,7 @@ public sealed class Room
         Scores.Clear();
         LastDelta.Clear();
         LastRoll.Clear();
-        foreach (var player in Players) player.IsReady = false;
+        foreach (var player in Players) player.IsReady = player.IsBot;
 
         // 立刻按当前人数重新发分，大厅里就能看到新的一轮起始分。
         EnsureScores();
@@ -365,6 +429,17 @@ public sealed class Room
     {
         if (player.Id != HostId || key is null) return;
 
+        if (key == "bots")
+        {
+            if (int.TryParse(text, out var count))
+            {
+                SetBotCount(count);
+                LastActivityMs = Now;
+            }
+
+            return;
+        }
+
         // 非 score.* 的键交给游戏自己处理（比如轮盘的子弹数）。
         if (!key.StartsWith("score.", StringComparison.Ordinal))
         {
@@ -396,6 +471,21 @@ public sealed class Room
         SyncAll();
     }
 
+    /// <summary>Stores a player's avatar and relays it to the room; null clears it.</summary>
+    public void SetAvatar(Player player, string? imageBase64)
+    {
+        player.AvatarBase64 = string.IsNullOrEmpty(imageBase64) ? null : imageBase64;
+        LastActivityMs = Now;
+
+        Broadcast(Envelope.Of(Msg.Avatar, new AvatarMessage
+        {
+            PlayerId = player.Id,
+            ImageBase64 = player.AvatarBase64,
+        }));
+
+        SyncAll();
+    }
+
     /// <summary>Routes a gameplay action to the active match.</summary>
     public void HandleGameAction(Player player, ActionRequest request)
     {
@@ -407,7 +497,7 @@ public sealed class Room
     {
         Game = null;
         Phase = RoomPhase.Lobby;
-        foreach (var player in Players) player.IsReady = false;
+        foreach (var player in Players) player.IsReady = player.IsBot;
 
         Log("system", "回到大厅，可以再来一局。");
         SyncAll();
@@ -425,6 +515,7 @@ public sealed class Room
         }
 
         Game?.Tick(this, nowMs);
+        Bots.Drive(this, nowMs);
     }
 
     public bool IsExpired(long nowMs) =>
@@ -446,7 +537,7 @@ public sealed class Room
     {
         foreach (var player in Players)
         {
-            if (player.IsOnline) player.Conn!.Send(envelope);
+            if (player.Conn is { IsClosed: false } conn) conn.Send(envelope);
         }
     }
 
@@ -454,13 +545,13 @@ public sealed class Room
     {
         foreach (var player in Players)
         {
-            if (player.IsOnline) player.Conn!.Send(Envelope.Of(Msg.Room, BuildSnapshot(player)));
+            if (player.Conn is { IsClosed: false } conn) conn.Send(Envelope.Of(Msg.Room, BuildSnapshot(player)));
         }
     }
 
     public void Sync(Player player)
     {
-        if (player.IsOnline) player.Conn!.Send(Envelope.Of(Msg.Room, BuildSnapshot(player)));
+        if (player.Conn is { IsClosed: false } conn) conn.Send(Envelope.Of(Msg.Room, BuildSnapshot(player)));
     }
 
     public RoomSnapshot BuildSnapshot(Player viewer, bool includeBacklog = false)
@@ -483,6 +574,12 @@ public sealed class Room
 
         if (HasScoring && ScoreEnabled) view.Scores = BuildScoreEntries(viewer);
 
+        // 谁有头像：只标一个 bool，图片本身随加入时的快照一起发
+        foreach (var card in view.Players)
+        {
+            card.HasAvatar = FindPlayer(card.Id)?.AvatarBase64 is not null;
+        }
+
         return new RoomSnapshot
         {
             Code = Code,
@@ -493,6 +590,11 @@ public sealed class Room
             ServerTimeMs = Now,
             View = view,
             Backlog = includeBacklog ? _backlog.ToList() : null,
+            Avatars = includeBacklog
+                ? Players.Where(p => p.AvatarBase64 is not null)
+                    .Select(p => new AvatarMessage { PlayerId = p.Id, ImageBase64 = p.AvatarBase64 })
+                    .ToList()
+                : null,
         };
     }
 
@@ -520,7 +622,7 @@ public sealed class Room
                 IsReady = p.IsReady,
                 IsAlive = p.IsOnline,
                 IsOffline = !p.IsOnline,
-                Badge = p.Id == HostId ? "房主" : p.IsReady ? "已准备" : "未准备",
+                Badge = p.IsBot ? "机器人" : p.Id == HostId ? "房主" : p.IsReady ? "已准备" : "未准备",
                 Sub = ScoreText(p.Id),
                 Accent = p.Id == HostId ? null : p.IsReady ? "good" : null,
             }).ToList(),
@@ -528,6 +630,19 @@ public sealed class Room
 
         // 只有房主看得到这几个旋钮，其他人在玩家卡片上看到积分就够了。
         if (HasScoring && viewer.Id == HostId) AddScoreFields(view);
+        if (viewer.Id == HostId)
+        {
+            view.Fields.Add(new GameField
+            {
+                Key = "bots",
+                Label = "机器人",
+                Value = BotTarget.ToString(),
+                Kind = "int",
+                Min = 0,
+                Max = Math.Max(0, MaxPlayers - 1),
+            });
+        }
+
         if (viewer.Id == HostId) AddGameFields(view);
 
         view.Stats = BuildStatsFor(viewer.Name);

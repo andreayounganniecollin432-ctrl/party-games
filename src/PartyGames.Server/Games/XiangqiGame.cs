@@ -26,6 +26,12 @@ public sealed class XiangqiGame : IGameModule
     private readonly List<string> _names = new();
 
     private int _turn;            // 0 = 红（下），1 = 黑（上）
+
+    /// <summary>Plies without a capture before the game is called a draw (60 rounds, like the 60-move rule).</summary>
+    private const int QuietPlyLimit = 120;
+
+    /// <summary>Plies since the last capture.</summary>
+    private int _quietPlies;
     private bool _finished;
     private string? _banner;
     private long _deadline;
@@ -141,8 +147,15 @@ public sealed class XiangqiGame : IGameModule
             return;
         }
 
+        _quietPlies = captured == '\0' ? _quietPlies + 1 : 0;
         _turn = 1 - _turn;
         _deadline = Now + 60_000;
+
+        if (_quietPlies >= QuietPlyLimit)
+        {
+            FinishDraw(room, "60 回合没吃子");
+            return;
+        }
 
         if (!HasAnyLegalMove(_turn))
         {
@@ -152,6 +165,21 @@ public sealed class XiangqiGame : IGameModule
         }
 
         if (InCheck(_turn)) room.Log("system", $"{_names[_turn]} 被将军了！");
+        room.SyncAll();
+    }
+
+    /// <summary>No capture in <see cref="QuietPlyLimit"/> plies: the game is called a draw, and nobody loses points.</summary>
+    private void FinishDraw(Room room, string reason)
+    {
+        _finished = true;
+        _banner = $"和棋（{reason}）";
+        room.Log("result", _banner);
+        room.Finish(new GameOutcome
+        {
+            Banner = _banner,
+            LosingSide = null,
+            LosingPlayerIds = new List<string>(),
+        });
         room.SyncAll();
     }
 

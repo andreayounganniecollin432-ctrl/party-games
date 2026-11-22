@@ -1,4 +1,8 @@
+using System.Numerics;
 using Dalamud.Game.Command;
+using Dalamud.Interface.ImGuiFileDialog;
+using Glasswork;
+using Glasswork.Dalamud;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Dalamud.Game.Text;
@@ -6,13 +10,16 @@ using Dalamud.Plugin.Services;
 
 namespace PartyGames;
 
-public sealed class Plugin : IDalamudPlugin
+public sealed class Plugin : IDalamudPlugin, IUiHost
 {
     private const string CommandName = "/pg";
 
     private readonly IDalamudPluginInterface pluginInterface;
     private readonly ICommandManager commandManager;
     private readonly WindowSystem windowSystem = new("PartyGames");
+
+    /// <summary>游戏内文件浏览器：画在 ImGui 里，不会被游戏窗口盖住。</summary>
+    private readonly FileDialogManager fileDialog = new();
     private readonly MainWindow mainWindow;
     private int lastToastIndex;
 
@@ -38,6 +45,23 @@ public sealed class Plugin : IDalamudPlugin
         Configuration = pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         Configuration.Initialize(pluginInterface);
 
+        // 液化玻璃：起不来就退回原来的自绘背景，绝不让插件因为玻璃挂掉。
+        if (Configuration.GlassEnabled)
+        {
+            try
+            {
+                Glass = new GlassworkHost(pluginInterface, log);
+
+                // 液化玻璃 + 金色主色，和插件原来的"水墨金边"对上
+                Glass.Look = Look.Liquid().WithAccent(Color.FromVector4(new Vector4(0.89f, 0.76f, 0.45f, 1.00f)));
+            }
+            catch (Exception exception)
+            {
+                log.Warning(exception, "PartyGames: glass unavailable, drawing the flat window instead");
+                Glass = null;
+            }
+        }
+
         Client = new GameClient(log);
         mainWindow = new MainWindow(this);
         windowSystem.AddWindow(mainWindow);
@@ -48,7 +72,7 @@ public sealed class Plugin : IDalamudPlugin
 
         commandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "打开 Party Games 窗口。",
+            HelpMessage = "打开 Coral's Games 窗口。",
         });
 
         if (Configuration.OpenOnLogin)
@@ -59,11 +83,15 @@ public sealed class Plugin : IDalamudPlugin
         log.Information("PartyGames loaded");
     }
 
-    public string Name => "Party Games";
+    public string Name => "Coral's Games";
 
     public Configuration Configuration { get; }
 
     public GameClient Client { get; }
+
+    IGameClient IUiHost.Client => Client;
+
+    public FileDialogManager Dialogs => fileDialog;
 
     public string CharacterName { get; }
 
@@ -74,6 +102,9 @@ public sealed class Plugin : IDalamudPlugin
 
     /// <summary>游戏聊天框（Echo 频道）</summary>
     public IChatGui Chat { get; }
+
+    /// <summary>玻璃层；null 表示没起来，窗口自己画背景。</summary>
+    public GlassworkHost? Glass { get; private set; }
 
 
     private void OnDraw()
@@ -105,8 +136,49 @@ public sealed class Plugin : IDalamudPlugin
             }
         }
 
+        if (Glass is { } glass)
+        {
+            try
+            {
+                glass.BeginFrame();
+            }
+            catch (Exception exception)
+            {
+                DisableGlass(exception);
+            }
+        }
+
         Toasts.Draw();
+        fileDialog.Draw();
         windowSystem.Draw();
+
+        if (Glass is { } closing)
+        {
+            try
+            {
+                closing.EndFrame();
+            }
+            catch (Exception exception)
+            {
+                DisableGlass(exception);
+            }
+        }
+    }
+
+    /// <summary>Turns the glass off for this session after a failure, so the window falls back to its own background.</summary>
+    private void DisableGlass(Exception exception)
+    {
+        Log.Warning(exception, "PartyGames: glass failed, falling back");
+        try
+        {
+            Glass?.Dispose();
+        }
+        catch
+        {
+            // shutting down anyway
+        }
+
+        Glass = null;
     }
 
     private void OnCommand(string command, string args) => ToggleMainWindow();
@@ -121,6 +193,7 @@ public sealed class Plugin : IDalamudPlugin
 
         commandManager.RemoveHandler(CommandName);
         windowSystem.RemoveAllWindows();
+        Glass?.Dispose();
         Client.Dispose();
     }
 }

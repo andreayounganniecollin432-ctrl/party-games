@@ -19,7 +19,7 @@ public enum ClientState
 /// <see cref="Pump"/> applies them on the UI thread, so all visible state is
 /// mutated from exactly one thread.
 /// </summary>
-public sealed class GameClient : IDisposable
+public sealed class GameClient : IGameClient, IDisposable
 {
     private readonly ConcurrentQueue<string> inbox = new();
     private readonly SemaphoreSlim sendLock = new(1, 1);
@@ -47,6 +47,9 @@ public sealed class GameClient : IDisposable
 
     /// <summary>Everyone connected to the server right now.</summary>
     public List<string> OnlineNames { get; } = new();
+
+    /// <summary>玩家 id → base64 头像。服务端在加入房间时发一份，之后只推变化。</summary>
+    public Dictionary<string, string> Avatars { get; } = new();
     public string? LastError { get; private set; }
     public long ServerOffsetMs { get; private set; }
 
@@ -107,6 +110,7 @@ public sealed class GameClient : IDisposable
         State = ClientState.Disconnected;
         Room = null;
         Events.Clear();
+        Avatars.Clear();
     }
 
     public async Task SendAsync(string type, object? payload)
@@ -226,6 +230,15 @@ public sealed class GameClient : IDisposable
                     Events.AddRange(snapshot.Backlog);
                 }
 
+                if (snapshot.Avatars is { Count: > 0 })
+                {
+                    foreach (var avatar in snapshot.Avatars)
+                    {
+                        if (string.IsNullOrEmpty(avatar.ImageBase64)) continue;
+                        Avatars[avatar.PlayerId] = avatar.ImageBase64;
+                    }
+                }
+
                 Room = snapshot;
                 break;
             }
@@ -243,6 +256,16 @@ public sealed class GameClient : IDisposable
 
                 OnlineNames.Clear();
                 OnlineNames.AddRange(status.OnlinePlayers);
+                break;
+            }
+
+            case Msg.Avatar:
+            {
+                var avatar = PgJson.Read<AvatarMessage>(envelope.Data);
+                if (avatar is null || string.IsNullOrEmpty(avatar.PlayerId)) return;
+
+                if (string.IsNullOrEmpty(avatar.ImageBase64)) Avatars.Remove(avatar.PlayerId);
+                else Avatars[avatar.PlayerId] = avatar.ImageBase64;
                 break;
             }
 

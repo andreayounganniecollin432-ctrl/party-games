@@ -39,6 +39,9 @@ public sealed class Configuration : IPluginConfiguration
 
     public bool OpenOnLogin { get; set; }
 
+    /// <summary>液化玻璃背景；关掉就用自绘背景图（显卡/驱动不支持时用这个）。</summary>
+    public bool GlassEnabled { get; set; } = true;
+
     public int PreferredMaxPlayers { get; set; } = 8;
 
     [JsonIgnore] private IDalamudPluginInterface? pluginInterface;

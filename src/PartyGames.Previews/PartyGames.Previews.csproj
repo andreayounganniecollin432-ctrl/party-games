@@ -1,0 +1,29 @@
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+
+  <!--
+    Screens the Glasswork.Preview tool renders without the game, so the Party Games look can be reviewed as PNGs
+    before anything ships. Dalamud never loads this assembly.
+  -->
+  <PropertyGroup>
+    <RootNamespace>PartyGames.Previews</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Use_DalamudPackager>false</Use_DalamudPackager>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PartyGames.Protocol\PartyGames.Protocol.csproj" />
+    <ProjectReference Include="..\PartyGames.Plugin\PartyGames.Plugin.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Glasswork" Version="0.1.0-beta.5" />
+    <PackageReference Include="Glasswork.Glass" Version="0.1.0-beta.5" />
+    <PackageReference Include="Glasswork.Backend" Version="0.1.0-beta.5" />
+    <PackageReference Include="Glasswork.Dalamud" Version="0.1.0-beta.5" />
+    <Reference Include="TerraFX.Interop.Windows">
+      <HintPath>$(DalamudLibPath)TerraFX.Interop.Windows.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

@@ -2,6 +2,8 @@ using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Text;
 using Dalamud.Interface.Windowing;
+using Glasswork;
+using Glasswork.Backend;
 using PartyGames.Protocol;
 
 namespace PartyGames;
@@ -18,7 +20,10 @@ public sealed class MainWindow : Window
     private static readonly Vector4 Warn = new(1.00f, 0.50f, 0.45f, 1.00f);
     private static readonly Vector4 Muted = new(0.65f, 0.65f, 0.68f, 1.00f);
 
-    private readonly Plugin plugin;
+    /// <summary>Watermark in the corner: the assembly version, so a build never lies about which one it is.</summary>
+    private static readonly string PluginVersion = "v" + (typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "0.0.0");
+
+    private readonly IUiHost host;
     private string serverUrl;
     private string displayName;
     private string joinCode = string.Empty;
@@ -39,43 +44,123 @@ public sealed class MainWindow : Window
     private string avatarPath = string.Empty;
     private string backgroundPath = string.Empty;
     private readonly Artwork artwork;
+    private readonly RemoteAvatars remoteAvatars = new();
+    private string lastAvatarRoom = string.Empty;
+    private string avatarError = string.Empty;
+    private bool showAvatarPath;
+    private string avatarPathInput = string.Empty;
 
-    public MainWindow(Plugin plugin)
-        : base("Party Games###PartyGamesMainWindow")
+    /// <summary>头像分辨率上限（宽和高都不能超）。</summary>
+    private const int AvatarMaxSide = 1000;
+    private bool collapsed;
+    private readonly Vector2 expandedSize = new(760, 900);
+
+    public MainWindow(IUiHost host)
+        : base("Coral's Games###PartyGamesMainWindow")
     {
-        this.plugin = plugin;
+        this.host = host;
         Size = new Vector2(620, 780);
         SizeCondition = ImGuiCond.FirstUseEver;
 
-        serverUrl = plugin.Configuration.ServerUrl;
-        displayName = string.IsNullOrWhiteSpace(plugin.Configuration.DisplayName)
-            ? plugin.CharacterName
-            : plugin.Configuration.DisplayName;
-        maxPlayers = plugin.Configuration.PreferredMaxPlayers;
-        avatarPath = plugin.Configuration.AvatarPath;
-        backgroundPath = plugin.Configuration.BackgroundPath;
-        artwork = new Artwork(plugin.Textures, plugin.Log);
+        // 玻璃层自己负责背景，控件也换成 Glasswork 的；起不来就还是原来的 ImGui 外观
+        if (host.Glass is not null)
+        {
+            // 玻璃自己就是整个窗口的外观：不要 ImGui 的标题栏和底板
+            Flags |= ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoTitleBar;
+            Theme.Glass = true;
+            Size = new Vector2(760, 900);
+        }
+
+        serverUrl = host.Configuration.ServerUrl;
+        displayName = string.IsNullOrWhiteSpace(host.Configuration.DisplayName)
+            ? host.CharacterName
+            : host.Configuration.DisplayName;
+        maxPlayers = Math.Clamp(host.Configuration.PreferredMaxPlayers, Proto.MinPlayers, Proto.MaxPlayers);
+        avatarPath = host.Configuration.AvatarPath;
+        backgroundPath = host.Configuration.BackgroundPath;
+        artwork = new Artwork(host.Textures, host.Log);
+
+        // 老配置里可能指着一张超大图：提示一下，并且不会上传
+        if (!string.IsNullOrEmpty(avatarPath))
+        {
+            try
+            {
+                using var image = System.Drawing.Image.FromFile(ResolveAvatarPath() ?? avatarPath);
+                if (image.Width > AvatarMaxSide || image.Height > AvatarMaxSide)
+                {
+                    avatarError = $"当前头像 {image.Width}×{image.Height} 超过 {AvatarMaxSide}×{AvatarMaxSide}，不会上传，请重新选择。";
+                }
+            }
+            catch
+            {
+                avatarError = "当前头像读不出来，请重新选择。";
+            }
+        }
     }
 
     public override void Draw()
     {
-        var client = plugin.Client;
-
-        // 外观：先把图片同步到配置里的路径，再铺背景
-        artwork.Sync(string.Empty, avatarPath);
-
-        // 版本水印：用于确认跑的是哪个 build
+        Theme.PushWindowStyle();
         try
         {
-            var dl = ImGui.GetForegroundDrawList();
-            var wp = ImGui.GetWindowPos();
-            var ws = ImGui.GetWindowSize();
-            dl.AddText(new Vector2(wp.X + ws.X - 78, wp.Y + 4),
-                ImGui.GetColorU32(new Vector4(0.85f, 0.75f, 0.45f, 0.9f)), "v0.3.1");
+            DrawInner();
         }
-        catch { }
-        artwork.DrawBackground(plugin.Configuration.BackgroundDim);
+        finally
+        {
+            Theme.PopWindowStyle();
+        }
+    }
 
+    private void DrawInner()
+    {
+        var client = host.Client;
+
+        // 头像每帧同步（玻璃模式下背景不用图，但头像要用）
+        artwork.Sync(string.Empty, ResolveAvatarPath() ?? string.Empty);
+        remoteAvatars.Sync(client, host.Textures);
+        TrySendAvatar(client);
+
+        // 外貌：玻璃层铺在窗口底下，折射的是游戏画面；没有玻璃才退回自绘背景图。
+        if (host.Glass is { } glass)
+        {
+            glass.DrawWindowBackground(22f, 0.55f, glass.Look.IsLight);
+        }
+        else
+        {
+            artwork.DrawBackground(host.Configuration.BackgroundDim);
+        }
+
+        // 窗口按钮放在背景之后画，否则会被背景盖住
+        if (Theme.Glass)
+        {
+            // 记下内容起点：SetCursorPos(0,0) 会跑到窗口左上角（圆角外），头像会显示不全
+            var contentStart = new Vector2(ImGui.GetCursorPosX(), ImGui.GetCursorPosY());
+            DrawGlassControls();
+            ImGui.SetCursorPos(contentStart);
+
+            if (collapsed)
+            {
+                DrawCollapsedHeader(client);
+                return;
+            }
+        }
+
+        // 版本水印：用于确认跑的是哪个 build（玻璃模式下版本号在页眉里，右上角留给关闭按钮）
+        if (!Theme.Glass)
+        {
+            try
+            {
+                var dl = ImGui.GetForegroundDrawList();
+                var wp = ImGui.GetWindowPos();
+                var ws = ImGui.GetWindowSize();
+                dl.AddText(new Vector2(wp.X + ws.X - 78, wp.Y + 4),
+                    ImGui.GetColorU32(new Vector4(0.85f, 0.75f, 0.45f, 0.9f)), PluginVersion);
+            }
+            catch
+            {
+                // 画水印失败不影响任何功能
+            }
+        }
         if (!client.IsConnected)
         {
             DrawConnect(client);
@@ -96,22 +181,22 @@ public sealed class MainWindow : Window
 
     // -- connect ----------------------------------------------------------
 
-    private void DrawConnect(GameClient client)
+    private void DrawConnect(IGameClient client)
     {
         // 自定义头像（只在这两页显示）
-        if (artwork.DrawAvatar(48))
-        {
-            ImGui.SameLine();
-        }
+        var avatarStart = ImGui.GetCursorScreenPos();
+        const float avatarSize = 44f;
+        ImGui.SetCursorScreenPos(new Vector2(avatarStart.X + avatarSize + 12f, avatarStart.Y));
 
         Theme.Header("跨服文字游戏 · 未连接", false);
+        Avatars.Draw(ImGui.GetWindowDrawList(), artwork, avatarStart, avatarSize, host.CharacterName, true);
         Theme.Section("连接");
 
         ImGui.SetNextItemWidth(360);
-        ImGui.InputText("服务器", ref serverUrl, 200);
+        Ui.InputText("服务器", ref serverUrl, 200);
 
         ImGui.SetNextItemWidth(360);
-        ImGui.InputText("昵称", ref displayName, 24);
+        Ui.InputText("昵称", ref displayName, 24);
 
         ImGui.Spacing();
 
@@ -122,17 +207,17 @@ public sealed class MainWindow : Window
         {
             SaveSettings();
             _ = client.ConnectAsync(serverUrl.Trim(), displayName.Trim(),
-                plugin.Configuration.LastRoomCode, plugin.Configuration.LastPlayerId);
+                host.Configuration.LastRoomCode, host.Configuration.LastPlayerId);
         }
 
-        if (!connecting && !string.IsNullOrWhiteSpace(plugin.Configuration.LastRoomCode))
+        if (!connecting && !string.IsNullOrWhiteSpace(host.Configuration.LastRoomCode))
         {
             ImGui.SameLine();
-            if (ImGui.Button($"回到房间 {plugin.Configuration.LastRoomCode}", new Vector2(200, 0)))
+            if (Theme.GhostButton($"回到房间 {host.Configuration.LastRoomCode}", new Vector2(200, 0)))
             {
                 SaveSettings();
                 _ = client.ConnectAsync(serverUrl.Trim(), displayName.Trim(),
-                    plugin.Configuration.LastRoomCode, plugin.Configuration.LastPlayerId);
+                    host.Configuration.LastRoomCode, host.Configuration.LastPlayerId);
             }
         }
 
@@ -151,85 +236,114 @@ public sealed class MainWindow : Window
 
         Theme.Section("提示");
 
-        var sync = plugin.Configuration.SyncChatToGame;
-        if (ImGui.Checkbox("同步聊天到游戏聊天框（Echo，只有自己看得到）", ref sync))
+        var sync = host.Configuration.SyncChatToGame;
+        if (Toggle("同步聊天到游戏聊天框（Echo，只有自己看得到）", ref sync))
         {
-            plugin.Configuration.SyncChatToGame = sync;
-            plugin.Configuration.Save();
+            host.Configuration.SyncChatToGame = sync;
+            host.Configuration.Save();
         }
         Theme.Section("外观（本地图片，可留空）");
 
-        // 图片库：扫描插件目录下的 images\ ，用下拉框选，不用任何系统对话框
-        if (ImGui.Button("打开图片文件夹", new Vector2(130, 0)))
+        // 头像：点按钮开 Windows 文件对话框，超过 1000×1000 的直接拒绝
+        if (Theme.Glass ? Gw.Button("选择头像图片…", ButtonStyle.Glass, ButtonSize.Small)
+                        : Theme.GhostButton("选择头像图片…", new Vector2(150, 0)))
         {
-            ImageLibrary.OpenFolder();
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("刷新", new Vector2(60, 0)))
-        {
-            images = ImageLibrary.Scan();
-        }
-        ImGui.SameLine();
-        Theme.Label("把图片丢进 images 文件夹即可");
-
-        if (images.Count == 0) images = ImageLibrary.Scan();
-
-
-        var avOptions = new List<string> { "（用名字首字）" };
-        avOptions.AddRange(images);
-        var avIndex = string.IsNullOrEmpty(avatarPath) ? 0 : avOptions.IndexOf(System.IO.Path.GetFileName(avatarPath));
-        if (avIndex < 0) avIndex = 0;
-
-        ImGui.SetNextItemWidth(430);
-        if (ImGui.Combo("头像", ref avIndex, avOptions.ToArray(), avOptions.Count))
-        {
-            avatarPath = avIndex == 0 ? string.Empty : ImageLibrary.PathOf(avOptions[avIndex]);
-            plugin.Configuration.AvatarPath = avatarPath;
-            plugin.Configuration.Save();
-            artwork.Invalidate();
+            host.Dialogs.OpenFileDialog("选择头像（不超过 1000×1000）", ".png,.jpg,.jpeg,.bmp", (ok, path) =>
+            {
+                if (ok && !string.IsNullOrEmpty(path))
+                {
+                    UseAvatar(path);
+                }
+            });
         }
 
-        var dim = plugin.Configuration.BackgroundDim;
+        ImGui.SameLine(0f, 8f);
+        if (Theme.Glass ? Gw.Button("清除", ButtonStyle.Glass, ButtonSize.Small)
+                        : Theme.GhostButton("清除", new Vector2(56, 0)))
+        {
+            ClearAvatar();
+        }
+
+        ImGui.SameLine(0f, 8f);
+        if (Theme.Glass ? Gw.Button("粘贴路径", ButtonStyle.Glass, ButtonSize.Small)
+                        : Theme.GhostButton("粘贴路径", new Vector2(96, 0)))
+        {
+            showAvatarPath = !showAvatarPath;
+        }
+
+        ImGui.SameLine(0f, 8f);
+        Theme.Label(string.IsNullOrEmpty(avatarPath) ? "没有选图，用名字首字" : System.IO.Path.GetFileName(avatarPath));
+
+        // 兜底：对话框万一被游戏窗口挡住，可以直接贴完整路径
+        if (showAvatarPath)
+        {
+            ImGui.SetNextItemWidth(360f);
+            Ui.InputText("##avatarpath", ref avatarPathInput, 260);
+            ImGui.SameLine(0f, 8f);
+            if (Theme.PrimaryButton("使用这个路径", new Vector2(104, 0)))
+            {
+                UseAvatar(avatarPathInput.Trim().Trim('"'));
+            }
+        }
+
+        if (!string.IsNullOrEmpty(avatarError))
+        {
+            TextColored(Warn, avatarError);
+        }
+
+        Theme.Label("只接受 1000×1000 以内的 PNG/JPG；换图后进房间会自动重新上传。");
+        var dim = host.Configuration.BackgroundDim;
         ImGui.SetNextItemWidth(200);
-        if (ImGui.SliderInt("背景压暗", ref dim, 0, 100))
+        Theme.PushSliderColors();
+        ImGui.SetNextItemWidth(220f);
+        var dimChanged = SliderInt("背景压暗", ref dim, 0, 100);
+        Theme.PopSliderColors();
+        if (dimChanged)
         {
-            plugin.Configuration.BackgroundDim = dim;
-            plugin.Configuration.Save();
+            host.Configuration.BackgroundDim = dim;
+            host.Configuration.Save();
         }
 
         Theme.Label("图片只保存在你本地，不会上传。");
+
+        Theme.Section("怎么玩");
+        Theme.Label("1. 在上面填服务器地址，点「连接」。");
+        Theme.Label("2. 在选游戏页挑一个，或者输朋友给的 5 位房间码。");
+        Theme.Label("3. 一个人也能玩：房主在房间里把「机器人」调上来，座位就坐满了。");
     }
 
     // -- lobby ------------------------------------------------------------
 
-    private void DrawTopBar(GameClient client)
+    private void DrawTopBar(IGameClient client)
     {
-        if (artwork.DrawAvatar(36))
-        {
-            ImGui.SameLine();
-        }
+        // 头像最后画：页眉里有一条分隔线，先画头像的话线会从脸上穿过去，看着像被裁了一刀
+        var avatarStart = ImGui.GetCursorScreenPos();
+        const float avatarSize = 30f;
 
+        ImGui.SetCursorScreenPos(new Vector2(avatarStart.X + avatarSize + 10f, avatarStart.Y));
         Theme.Header($"已连接 · {client.PlayerName ?? "?"}" + (client.Room is not null ? $" · 房间 {client.Room.Code}" : ""), true);
 
-        if (ImGui.Button("断开"))
+        Avatars.Draw(ImGui.GetWindowDrawList(), artwork, avatarStart, avatarSize, host.CharacterName, true);
+
+        if (Theme.GhostButton("断开", new Vector2(72, 0)))
         {
             client.Disconnect();
             return;
         }
 
         ImGui.SameLine();
-        var syncOn = plugin.Configuration.SyncChatToGame;
-        if (ImGui.Checkbox("聊天提示", ref syncOn))
+        var syncOn = host.Configuration.SyncChatToGame;
+        if (Toggle("聊天提示", ref syncOn))
         {
-            plugin.Configuration.SyncChatToGame = syncOn;
-            plugin.Configuration.Save();
+            host.Configuration.SyncChatToGame = syncOn;
+            host.Configuration.Save();
         }
 
-        ImGui.Separator();
+        Theme.Divider();
         ImGui.Spacing();
     }
 
-    private void DrawLobby(GameClient client)
+    private void DrawLobby(IGameClient client)
     {
         TextMuted($"服务器在线 {client.ServerOnline} 人 · {client.ServerRooms} 个房间");
 
@@ -247,54 +361,245 @@ public sealed class MainWindow : Window
             TextMuted("我的战绩：暂无记录（打完一局就有了）");
         }
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
+        Theme.Section("开始一局");
 
-        TextColored(Accent, "选择一个游戏开局");
-        ImGui.Spacing();
+        if (Theme.Glass)
+        {
+            DrawLobbyActionsGlass(client);
+        }
+        else
+        {
+            if (Theme.PrimaryButton("进入聊天大厅", new Vector2(132, 0)))
+            {
+                _ = client.SendAsync(Msg.JoinRoom, new JoinRoomRequest { Code = "LOBBY" });
+            }
+
+            ImGui.SameLine(0f, 14f);
+            Theme.Label("人数上限");
+            ImGui.SameLine(0f, 6f);
+            if (Theme.Stepper(ref maxPlayers, Proto.MinPlayers, Proto.MaxPlayers, "##maxplayers"))
+            {
+                host.Configuration.PreferredMaxPlayers = maxPlayers;
+                SaveSettings();
+            }
+
+            ImGui.SameLine(0f, 16f);
+            Theme.Label("房间码");
+            ImGui.SameLine(0f, 6f);
+            ImGui.SetNextItemWidth(96f);
+            Ui.InputText("##joincode", ref joinCode, 8);
+            ImGui.SameLine(0f, 6f);
+            if (Theme.PrimaryButton("加入", new Vector2(64, 0)))
+            {
+                var code = joinCode.Trim().ToUpperInvariant();
+                if (code.Length > 0)
+                {
+                    _ = client.SendAsync(Msg.JoinRoom, new JoinRoomRequest { Code = code });
+                }
+            }
+
+            ImGui.Spacing();
+        }
 
         if (client.Games.Count == 0)
         {
             TextMuted("服务器没有报告任何游戏。");
         }
 
-        if (ImGui.Button("进入聊天大厅", new Vector2(160, 0)))
+        foreach (var game in client.Games)
+        {
+            // 聊天大厅有单独的入口按钮，不在目录里重复出现
+            if (game.Id == "lobby") continue;
+
+            ImGui.PushID(game.Id);
+            DrawGameRow(client, game);
+            ImGui.PopID();
+        }
+
+    }
+
+    /// <summary>收起来时的那一行：名字 + 房间 + 状态。</summary>
+    private void DrawCollapsedHeader(IGameClient client)
+    {
+        var room = client.Room is { } snapshot ? $" · 房间 {snapshot.Code}" : string.Empty;
+        var subtitle = client.IsConnected ? $"已连接 · {client.PlayerName ?? "?"}{room}" : "跨服文字游戏 · 未连接";
+        Theme.Header(subtitle, client.IsConnected);
+    }
+
+    /// <summary>选好的头像：先验分辨率，再存配置并让服务端重传。</summary>
+    private void UseAvatar(string path)
+    {
+        avatarError = string.Empty;
+
+        try
+        {
+            using var image = System.Drawing.Image.FromFile(path);
+            if (image.Width > AvatarMaxSide || image.Height > AvatarMaxSide)
+            {
+                avatarError = $"这张图是 {image.Width}×{image.Height}，超过 {AvatarMaxSide}×{AvatarMaxSide}，不能用作头像。";
+                return;
+            }
+        }
+        catch (Exception exception)
+        {
+            avatarError = "读不出这张图：" + exception.Message;
+            return;
+        }
+
+        avatarPath = path;
+        host.Configuration.AvatarPath = path;
+        host.Configuration.Save();
+        artwork.Invalidate();
+        lastAvatarRoom = string.Empty;   // 换图了，进房间时重传
+    }
+
+    private void ClearAvatar()
+    {
+        avatarPath = string.Empty;
+        avatarError = string.Empty;
+        host.Configuration.AvatarPath = string.Empty;
+        host.Configuration.Save();
+        artwork.Invalidate();
+        lastAvatarRoom = string.Empty;
+    }
+
+    /// <summary>进入新房间时把自己的头像传上去（服务端转给全房）。</summary>
+    private void TrySendAvatar(IGameClient client)
+    {
+        var room = client.Room;
+
+        if (room is null)
+        {
+            lastAvatarRoom = string.Empty;
+            return;
+        }
+
+        if (room.Code == lastAvatarRoom)
+        {
+            return;
+        }
+
+        lastAvatarRoom = room.Code;
+
+        var path = ResolveAvatarPath();
+        if (path is null)
+        {
+            return;
+        }
+
+        var payload = AvatarUpload.Prepare(path, out var reason);
+        if (payload is null)
+        {
+            host.Log?.Information($"[PartyGames] 头像未上传：{reason}");
+            return;
+        }
+
+        _ = client.SendAsync(Msg.Avatar, new AvatarUploadRequest { ImageBase64 = payload });
+        host.Log?.Information($"[PartyGames] 已上传头像（{reason}）");
+    }
+
+    /// <summary>
+    /// 配置里存的可能是相对路径（images\xxx.png）。老版本是按游戏工作目录解析的，
+    /// 所以这里按「插件目录 → 游戏工作目录 → 游戏 exe 目录」依次找，第一个存在的就算。
+    /// </summary>
+    private string? ResolveAvatarPath()
+    {
+        var configured = host.Configuration.AvatarPath;
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            return null;
+        }
+
+        if (System.IO.Path.IsPathRooted(configured))
+        {
+            return System.IO.File.Exists(configured) ? configured : null;
+        }
+
+        foreach (var root in AvatarRoots())
+        {
+            if (string.IsNullOrEmpty(root)) continue;
+
+            var candidate = System.IO.Path.Combine(root, configured);
+            if (System.IO.File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        // 都没找到：把第一个候选路径交回去，让上层报"读不出来"
+        var fallback = System.IO.Path.GetDirectoryName(typeof(MainWindow).Assembly.Location);
+        return fallback is null ? configured : System.IO.Path.Combine(fallback, configured);
+    }
+
+    private static IEnumerable<string> AvatarRoots()
+    {
+        yield return System.IO.Path.GetDirectoryName(typeof(MainWindow).Assembly.Location) ?? string.Empty;
+        yield return Environment.CurrentDirectory;
+        yield return System.IO.Path.GetDirectoryName(Environment.ProcessPath ?? string.Empty) ?? string.Empty;
+    }
+
+    /// <summary>玻璃模式下没有 ImGui 标题栏：右上角补两个胶囊按钮，收起 / 关闭。</summary>
+    private void DrawGlassControls()
+    {
+        // 用内容区坐标 + SameLine 摆到行尾：Glasswork 的按钮要求参与 ImGui 的布局流
+        var rowY = 6f;
+        ImGui.SetCursorPos(new Vector2(0f, rowY));
+        ImGui.Dummy(new Vector2(0f, 0f));
+        ImGui.SameLine(MathF.Max(0f, ImGui.GetContentRegionAvail().X - 104f));
+        if (Gw.Button(collapsed ? "展开" : "收起", ButtonStyle.Glass, ButtonSize.Small))
+        {
+            SetCollapsed(!collapsed);
+        }
+
+        ImGui.SameLine(0f, 6f);
+        if (Gw.Button("关闭", ButtonStyle.Glass, ButtonSize.Small))
+        {
+            IsOpen = false;
+        }
+    }
+
+    /// <summary>收起时只留一条页眉，高度压到一行。</summary>
+    private void SetCollapsed(bool value)
+    {
+        collapsed = value;
+        ImGui.SetWindowSize(collapsed ? new Vector2(ImGui.GetWindowWidth(), 54f) : expandedSize);
+    }
+
+    /// <summary>聊天大厅 / 人数上限 / 房间码，玻璃下各占一行——胶囊控件比原生控件宽，挤一行会换行错位。</summary>
+    private void DrawLobbyActionsGlass(IGameClient client)
+    {
+        Gw.BeginRow("聊天大厅", "不玩牌，只聊天");
+        if (Gw.Button("进入", ButtonStyle.Default, ButtonSize.Small))
         {
             _ = client.SendAsync(Msg.JoinRoom, new JoinRoomRequest { Code = "LOBBY" });
         }
-        ImGui.SameLine();
-        Theme.Label("大厅不玩牌，只聊天");
-        ImGui.Spacing();
 
-        foreach (var game in client.Games)
+        Gw.EndRow();
+
+        Gw.BeginRow("人数上限", "开局时的座位数");
+        if (Gw.Button("-", ButtonStyle.Glass, ButtonSize.Small))
         {
-            ImGui.PushID(game.Id);
-            TextColored(Accent, game.Name);
-            TextWrapped(game.Blurb);
-            TextMuted($"{game.MinPlayers}-{game.MaxPlayers} 人");
-
-            ImGui.SetNextItemWidth(140);
-            ImGui.SliderInt("人数上限", ref maxPlayers, game.MinPlayers, game.MaxPlayers);
-
-            if (ImGui.Button("创建房间", new Vector2(140, 0)))
-            {
-                plugin.Configuration.PreferredMaxPlayers = maxPlayers;
-                SaveSettings();
-                _ = client.SendAsync(Msg.CreateRoom, new CreateRoomRequest { GameId = game.Id, MaxPlayers = maxPlayers });
-            }
-
-            ImGui.PopID();
-            ImGui.Separator();
-            ImGui.Spacing();
+            maxPlayers = Math.Max(Proto.MinPlayers, maxPlayers - 1);
+            host.Configuration.PreferredMaxPlayers = maxPlayers;
+            SaveSettings();
         }
 
-        TextColored(Accent, "加入房间");
-        ImGui.SetNextItemWidth(150);
-        ImGui.InputText("房间码", ref joinCode, 8);
-        ImGui.SameLine();
+        ImGui.SameLine(0f, 6f);
+        Theme.Value(maxPlayers.ToString());
+        ImGui.SameLine(0f, 6f);
+        if (Gw.Button("+", ButtonStyle.Glass, ButtonSize.Small))
+        {
+            maxPlayers = Math.Min(Proto.MaxPlayers, maxPlayers + 1);
+            host.Configuration.PreferredMaxPlayers = maxPlayers;
+            SaveSettings();
+        }
 
-        if (ImGui.Button("加入", new Vector2(90, 0)))
+        Gw.EndRow();
+
+        Gw.BeginRow("房间码", "5 位，不区分大小写");
+        ImGui.SetNextItemWidth(180f);
+        Ui.InputText("##joincode", ref joinCode, 8);
+        if (Gw.Button("加入", ButtonStyle.Prominent, ButtonSize.Small))
         {
             var code = joinCode.Trim().ToUpperInvariant();
             if (code.Length > 0)
@@ -302,11 +607,63 @@ public sealed class MainWindow : Window
                 _ = client.SendAsync(Msg.JoinRoom, new JoinRoomRequest { Code = code });
             }
         }
+
+        Gw.EndRow();
+        Gw.Divider();
+    }
+
+    /// <summary>One catalogue row: name, blurb, player range and the create button, inside a card.</summary>
+    private void DrawGameRow(IGameClient client, GameDescriptor game)
+    {
+        if (Theme.Glass)
+        {
+            Gw.BeginRow(game.Name, game.Blurb, $"{game.MinPlayers}-{game.MaxPlayers} 人");
+            if (Gw.Button("创建房间", ButtonStyle.Prominent, ButtonSize.Small))
+            {
+                var size = Math.Clamp(maxPlayers, game.MinPlayers, game.MaxPlayers);
+                host.Configuration.PreferredMaxPlayers = size;
+                SaveSettings();
+                _ = client.SendAsync(Msg.CreateRoom, new CreateRoomRequest { GameId = game.Id, MaxPlayers = size });
+            }
+
+            Gw.EndRow();
+            return;
+        }
+
+        const float height = 48f;
+        var topLeft = ImGui.GetCursorScreenPos();
+        var width = ImGui.GetContentRegionAvail().X;
+
+        Theme.Card(topLeft, width, height);
+
+        var buttonWidth = 96f;
+        var textWidth = width - buttonWidth - 34f;
+
+        ImGui.SetCursorScreenPos(new Vector2(topLeft.X + 10f, topLeft.Y + 7f));
+        ImGui.PushStyleColor(ImGuiCol.Text, Theme.Gold);
+        ImGui.TextUnformatted(game.Name);
+        ImGui.PopStyleColor();
+        ImGui.SameLine(0f, 8f);
+        Theme.Label($"{game.MinPlayers}-{game.MaxPlayers} 人");
+
+        ImGui.SetCursorScreenPos(new Vector2(topLeft.X + 10f, topLeft.Y + 25f));
+        Theme.Label(Theme.Fit(game.Blurb, textWidth));
+
+        ImGui.SetCursorScreenPos(new Vector2(topLeft.X + width - buttonWidth - 10f, topLeft.Y + (height - ImGui.GetFrameHeight()) * 0.5f));
+        if (Theme.PrimaryButton("创建房间", new Vector2(buttonWidth, 0)))
+        {
+            var size = Math.Clamp(maxPlayers, game.MinPlayers, game.MaxPlayers);
+            host.Configuration.PreferredMaxPlayers = size;
+            SaveSettings();
+            _ = client.SendAsync(Msg.CreateRoom, new CreateRoomRequest { GameId = game.Id, MaxPlayers = size });
+        }
+
+        ImGui.SetCursorScreenPos(new Vector2(topLeft.X, topLeft.Y + height + 5f));
     }
 
     // -- room -------------------------------------------------------------
 
-    private void DrawRoom(GameClient client)
+    private void DrawRoom(IGameClient client)
     {
         var snapshot = client.Room!;
         var view = snapshot.View;
@@ -316,14 +673,14 @@ public sealed class MainWindow : Window
         {
             // 有可选动作 = 轮到你决断了，单独强调一次
             var hasActions = view.Actions is { Count: > 0 };
-            if (hasActions && !lastHadActions && plugin.Configuration.SoundEnabled && plugin.Configuration.VoiceEnabled)
+            if (hasActions && !lastHadActions && host.Configuration.SoundEnabled && host.Configuration.VoiceEnabled)
             {
                 Sfx.PlayClip("dz-lundao", "轮到你了");
             }
             lastHadActions = hasActions;
 
             // 新出的牌 → 用珊瑚的声音念牌型
-            if (snapshot.GameId == "doudizhu" && plugin.Configuration.SoundEnabled)
+            if (snapshot.GameId == "doudizhu" && host.Configuration.SoundEnabled)
             {
                 if (client.Events.Count > lastVoiceLogCount)
                 {
@@ -361,13 +718,13 @@ public sealed class MainWindow : Window
             if (key != lastAnnounce)
             {
                 lastAnnounce = key;
-                if (plugin.Configuration.SoundEnabled)
+                if (host.Configuration.SoundEnabled)
                 {
                     // 斗地主：牌型和"轮到你了"都由珊瑚语音播，这里不再用系统语音念
                     var say = snapshot.GameId == "doudizhu"
                         ? string.Empty
                         : (!string.IsNullOrEmpty(view.ResultBanner) ? view.ResultBanner : view.Instruction);
-                    if (plugin.Configuration.VoiceEnabled && !string.IsNullOrEmpty(say))
+                    if (host.Configuration.VoiceEnabled && !string.IsNullOrEmpty(say))
                     {
                         say = say.Replace("*", " ").Replace("【", string.Empty).Replace("】", string.Empty).Replace("\n", " ");
                         if (say.Length > 60) say = say[..60];
@@ -410,7 +767,9 @@ public sealed class MainWindow : Window
         if (!string.IsNullOrEmpty(view.PrivateNote))
         {
             ImGui.Spacing();
-            TextColored(Gold, $"{view.PrivateNoteLabel ?? "提示"}：{view.PrivateNote}");
+            // 斗地主的手牌在下面的牌面里，这里只留一句提示，免得花色字形缺失时满屏方块。
+            var note = snapshot.GameId == "doudizhu" ? "（点下面的牌面出牌）" : view.PrivateNote;
+            TextColored(Gold, $"{view.PrivateNoteLabel ?? "提示"}：{note}");
         }
 
         if (!string.IsNullOrEmpty(view.Instruction))
@@ -448,35 +807,53 @@ public sealed class MainWindow : Window
         ImGui.SetCursorPos(new Vector2(0, y0));
         }
 
+        var playing = snapshot.Phase == RoomPhase.Playing;
+
         DrawFields(client, view);
         DrawPlayers(view);
+
+        // 棋类先画棋盘：它是这屏的主角，不能被积分榜挤到折叠线以下。
+        if (playing && snapshot.GameId == "xiangqi") DrawXiangqiBoard(client, view);
+
         DrawScoreboard(view);
         DrawStats(view);
         ImGui.Spacing();
         // 认输：仅象棋与斗地主，点了直接结算
-        if ((snapshot.GameId == "xiangqi" || snapshot.GameId == "doudizhu")
+        if (playing
+            && (snapshot.GameId == "xiangqi" || snapshot.GameId == "doudizhu")
             && string.IsNullOrEmpty(view.ResultBanner))
         {
-            if (ImGui.Button("认输", new Vector2(80, 0)))
+            if (Theme.DangerButton("认输", new Vector2(80, 0)))
             {
                 _ = client.SendAsync(Msg.Action, new ActionRequest { Kind = "resign" });
             }
             ImGui.SameLine();
         }
-        if (snapshot.GameId == "doudizhu") DrawCardPicker(client, view);
-        if (snapshot.GameId == "xiangqi") DrawXiangqiBoard(client, view);
-        DrawActions(client, view);
+        if (playing && snapshot.GameId == "doudizhu")
+        {
+            DrawCardPicker(client, view);
+        }
+
+        // 斗地主对局中动作由选牌区接管，但「回到大厅 / 离开房间」这类房间级动作还要留
+        if (playing && snapshot.GameId == "doudizhu")
+        {
+            DrawSystemActions(client, view);
+        }
+        else
+        {
+            DrawActions(client, view);
+        }
         DrawActionInput(client, view);
-        DrawLog(client);
+        DrawLog(client, view);
         DrawChat(client);
     }
 
     /// <summary>Host-only lane for room settings (currently the scoring rules).</summary>
-    private static void DrawFields(GameClient client, GameView view)
+    private static void DrawFields(IGameClient client, GameView view)
     {
         if (view.Fields.Count == 0) return;
 
-        ImGui.Separator();
+        Theme.Divider();
         TextMuted("积分规则（房主可调）");
 
         for (var i = 0; i < view.Fields.Count; i++)
@@ -487,7 +864,7 @@ public sealed class MainWindow : Window
             if (field.Kind == "bool")
             {
                 var on = field.Value == "1";
-                if (ImGui.Button($"{field.Label}：{(on ? "开" : "关")}", new Vector2(150, 0)) && field.Editable)
+                if (Theme.GhostButton($"{field.Label}：{(on ? "开" : "关")}", new Vector2(132, 0)) && field.Editable)
                 {
                     Send(client, field.Key, on ? "0" : "1");
                 }
@@ -496,10 +873,31 @@ public sealed class MainWindow : Window
             {
                 var value = int.TryParse(field.Value, out var parsed) ? parsed : field.Min;
 
+                if (Theme.Glass)
+                {
+                    Gw.BeginRow(field.Label, $"{field.Min} - {field.Max}");
+                    if (Gw.Button("-", ButtonStyle.Glass, ButtonSize.Small) && field.Editable)
+                    {
+                        Send(client, field.Key, Math.Max(field.Min, value - 1).ToString());
+                    }
+
+                    ImGui.SameLine(0f, 6f);
+                    Theme.Value(value.ToString());
+                    ImGui.SameLine(0f, 6f);
+                    if (Gw.Button("+", ButtonStyle.Glass, ButtonSize.Small) && field.Editable)
+                    {
+                        Send(client, field.Key, Math.Min(field.Max, value + 1).ToString());
+                    }
+
+                    Gw.EndRow();
+                    ImGui.PopID();
+                    continue;
+                }
+
                 TextMuted(field.Label);
                 ImGui.SameLine();
 
-                if (ImGui.SmallButton("-##minus") && field.Editable)
+                if (Theme.GhostButton("-", new Vector2(20, 0)) && field.Editable)
                 {
                     Send(client, field.Key, Math.Max(field.Min, value - 1).ToString());
                 }
@@ -508,7 +906,7 @@ public sealed class MainWindow : Window
                 ImGui.Text($"{value}");
                 ImGui.SameLine();
 
-                if (ImGui.SmallButton("+##plus") && field.Editable)
+                if (Theme.GhostButton("+", new Vector2(20, 0)) && field.Editable)
                 {
                     Send(client, field.Key, Math.Min(field.Max, value + 1).ToString());
                 }
@@ -521,7 +919,7 @@ public sealed class MainWindow : Window
     }
 
     /// <summary>把新收到的聊天打印到游戏聊天框（Echo 频道，只有自己看得到）。</summary>
-    private void SyncChatToGameChat(GameClient client)
+    private void SyncChatToGameChat(IGameClient client)
     {
         if (client.Events.Count <= lastEchoCount) return;
 
@@ -535,6 +933,16 @@ public sealed class MainWindow : Window
 
         lastEchoCount = client.Events.Count;
     }
+    /// <summary>花色单字。不用 ♠♥♣♦：游戏字体不一定带这些字形，缺了就是一排方块。</summary>
+    private static string SuitWord(char suit) => suit switch
+    {
+        '♠' => "黑",
+        '♥' => "红",
+        '♣' => "梅",
+        '♦' => "方",
+        _ => string.Empty,
+    };
+
     private static string XqPiece(char p) => p switch
     {
         'K' => "帅", 'A' => "仕", 'B' => "相", 'N' => "马", 'R' => "车", 'C' => "炮", 'P' => "兵",
@@ -543,7 +951,7 @@ public sealed class MainWindow : Window
     };
 
     /// <summary>象棋棋盘：9×10，点击选子再点落点。</summary>
-    private void DrawXiangqiBoard(GameClient client, GameView view)
+    private void DrawXiangqiBoard(IGameClient client, GameView view)
     {
         if (view.Board.Count < 10) return;
 
@@ -555,7 +963,10 @@ public sealed class MainWindow : Window
             xqSelC = -1;
         }
 
-        const float cell = 48f;
+        // 棋盘按可用宽度/高度算格子大小，窗口拉大拉小都能完整放下
+        var availWidth = ImGui.GetContentRegionAvail().X;
+        var availHeight = ImGui.GetContentRegionAvail().Y;
+        var cell = Math.Clamp(MathF.Min((availWidth - 40f) / 9f, (availHeight - 24f) / 10f), 22f, 46f);
         var w = cell * 8;
         var h = cell * 9;
         var rawPos = ImGui.GetCursorScreenPos();
@@ -566,9 +977,9 @@ public sealed class MainWindow : Window
         // 底色
         dl.AddRectFilled(new Vector2(origin.X - 12, origin.Y - 12),
             new Vector2(origin.X + w + 12, origin.Y + h + 12),
-            ImGui.GetColorU32(new Vector4(0.93f, 0.86f, 0.70f, 1f)), 6f);
+            ImGui.GetColorU32(new Vector4(0.13f, 0.12f, 0.10f, 0.92f)), 6f);
 
-        var lineCol = ImGui.GetColorU32(new Vector4(0.35f, 0.28f, 0.18f, 1f));
+        var lineCol = ImGui.GetColorU32(new Vector4(0.55f, 0.45f, 0.28f, 0.85f));
 
         // 横线
         for (var r = 0; r < 10; r++)
@@ -618,8 +1029,8 @@ public sealed class MainWindow : Window
                 if (ch == '.') continue;
 
                 var isRed = char.IsUpper(ch);
-                var fill = isRed ? new Vector4(0.98f, 0.94f, 0.86f, 1f) : new Vector4(0.90f, 0.88f, 0.84f, 1f);
-                var ring = isRed ? new Vector4(0.70f, 0.15f, 0.15f, 1f) : new Vector4(0.15f, 0.15f, 0.18f, 1f);
+                var fill = new Vector4(0.22f, 0.20f, 0.16f, 1f);
+                var ring = isRed ? new Vector4(0.88f, 0.36f, 0.30f, 1f) : new Vector4(0.85f, 0.80f, 0.68f, 1f);
 
                 dl.AddCircleFilled(new Vector2(cx, cy), cell * 0.42f, ImGui.GetColorU32(fill), 24);
                 dl.AddCircle(new Vector2(cx, cy), cell * 0.42f, ImGui.GetColorU32(ring), 24, 2f);
@@ -670,7 +1081,7 @@ public sealed class MainWindow : Window
         }
     }
     /// <summary>取出最近 N 手出牌（演员 + 牌面）。</summary>
-    private static List<(string Actor, string[] Cards)> FindRecentPlays(GameClient client, int max)
+    private static List<(string Actor, string[] Cards)> FindRecentPlays(IGameClient client, int max)
     {
         var list = new List<(string, string[])>();
         for (var i = client.Events.Count - 1; i >= 0 && list.Count < max; i--)
@@ -691,7 +1102,7 @@ public sealed class MainWindow : Window
         return list;
     }
 
-    private static string[] FindLastPlay(GameClient client)
+    private static string[] FindLastPlay(IGameClient client)
     {
         for (var i = client.Events.Count - 1; i >= 0; i--)
         {
@@ -731,16 +1142,16 @@ public sealed class MainWindow : Window
 
         var ink = ImGui.GetColorU32(isRed ? new Vector4(0.80f, 0.12f, 0.12f, 1f) : new Vector4(0.12f, 0.12f, 0.14f, 1f));
         dl.AddText(new Vector2(a.X + 4, a.Y + 3), ink, rank);
-        if (suit != '\0') dl.AddText(new Vector2(a.X + 4, a.Y + 16), ink, suit.ToString());
 
-        var big = suit == '\0' ? (token == "小王" ? "小" : "大") : suit.ToString();
+
+        var big = suit == '\0' ? (token == "小王" ? "小" : "大") : SuitWord(suit);
         var bigSize = ImGui.CalcTextSize(big);
         dl.AddText(new Vector2(a.X + (size.X - bigSize.X) / 2, b.Y - bigSize.Y - 6), ink, big);
 
         ImGui.Dummy(size);
     }
     /// <summary>斗地主图形选牌：把手牌拆成按钮，点选后一键出牌。</summary>
-    private void DrawCardPicker(GameClient client, GameView view)
+    private void DrawCardPicker(IGameClient client, GameView view)
     {
         var hand = view.PrivateNote;
         if (string.IsNullOrWhiteSpace(hand)) return;
@@ -754,9 +1165,12 @@ public sealed class MainWindow : Window
         var tokens = hand!.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         Theme.Section($"选牌（{pickedCards.Count}/{tokens.Length}）");
 
+        var cardSize = new Vector2(48, 66);
+        var perRow = Math.Max(4, (int)(ImGui.GetContentRegionAvail().X / (cardSize.X + 4f)));
+
         for (var i = 0; i < tokens.Length; i++)
         {
-            if (i > 0 && i % 9 != 0) ImGui.SameLine();
+            if (i > 0 && i % perRow != 0) ImGui.SameLine();
 
             var picked = pickedCards.Contains(i);
             var token = tokens[i];
@@ -794,9 +1208,9 @@ public sealed class MainWindow : Window
             var inkU = ImGui.GetColorU32(ink);
 
             dl.AddText(new Vector2(a.X + 5, a.Y + 3), inkU, rank);
-            if (suit != '\0') dl.AddText(new Vector2(a.X + 5, a.Y + 18), inkU, suit.ToString());
 
-            var bigText = suit == '\0' ? (token == "小王" ? "小" : "大") : suit.ToString();
+
+            var bigText = suit == '\0' ? (token == "小王" ? "小" : "大") : SuitWord(suit);
             var bigSize = ImGui.CalcTextSize(bigText);
             dl.AddText(new Vector2(a.X + (size.X - bigSize.X) / 2, b.Y - bigSize.Y - 8), inkU, bigText);
 
@@ -819,12 +1233,23 @@ public sealed class MainWindow : Window
         if (!canPlay) ImGui.EndDisabled();
 
         ImGui.SameLine();
-        if (ImGui.Button("清空", new Vector2(80, 0))) pickedCards.Clear();
+        if (Theme.GhostButton("清空", new Vector2(80, 0))) pickedCards.Clear();
+
+        ImGui.SameLine();
+        var canPass = view.Actions.Any(a => a is { Kind: "pass", Enabled: true });
+        if (!canPass) ImGui.BeginDisabled();
+        if (Theme.GhostButton("要不起", new Vector2(88, 0)))
+        {
+            _ = client.SendAsync(Msg.Action, new ActionRequest { Kind = "pass" });
+            pickedCards.Clear();
+        }
+
+        if (!canPass) ImGui.EndDisabled();
 
         ImGui.SameLine();
         Theme.Label(canPlay ? "点牌选中，再点出牌" : "现在不是你的回合");
     }
-    private static void Send(GameClient client, string key, string value)
+    private static void Send(IGameClient client, string key, string value)
     {
         _ = client.SendAsync(Msg.Action, new ActionRequest
         {
@@ -845,7 +1270,7 @@ public sealed class MainWindow : Window
 
     private static void DrawStatRows(List<StatRow> rows, string title)
     {
-        TextMuted(title);
+        Theme.Section(title);
 
         var totalWins = 0;
         var totalLosses = 0;
@@ -891,55 +1316,88 @@ public sealed class MainWindow : Window
 
     private void DrawPlayers(GameView view)
     {
-        ImGui.BeginChild("##players", new Vector2(0, 168), true, ImGuiWindowFlags.None);
+        const float rowHeight = 27f;
+        const float avatarSize = 20f;
+        const float textOffset = avatarSize + 9f;
 
-        foreach (var player in view.Players)
+        var playerListHeight = MathF.Min(240f, 10f + view.Players.Count * rowHeight);
+        ImGui.BeginChild("##players", new Vector2(0, playerListHeight), true, ImGuiWindowFlags.None);
+
+        var drawList = ImGui.GetWindowDrawList();
+        var origin = ImGui.GetCursorScreenPos();
+
+        for (var i = 0; i < view.Players.Count; i++)
         {
-            // 自己的头像：自定义图片 → 没有就画个首字色块（别人的头像协议里没传）
-            if (player.IsYou)
-            {
-                if (!artwork.DrawAvatar(22))
-                {
-                    var draw = ImGui.GetWindowDrawList();
-                    var at = ImGui.GetCursorScreenPos();
-                    draw.AddRectFilled(at, new Vector2(at.X + 22, at.Y + 22), ImGui.GetColorU32(new Vector4(0.62f, 0.48f, 0.25f, 1f)), 4f);
-                    var ch = string.IsNullOrEmpty(player.Name) ? "?" : player.Name[..1];
-                    draw.AddText(new Vector2(at.X + 6, at.Y + 3), ImGui.GetColorU32(new Vector4(0.12f, 0.10f, 0.08f, 1f)), ch);
-                    ImGui.Dummy(new Vector2(22, 22));
-                }
-                ImGui.SameLine();
-            }
+            var player = view.Players[i];
+            var rowTop = origin.Y + i * rowHeight;
+
+            Avatars.Draw(drawList, artwork, new Vector2(origin.X + 2f, rowTop + 4f), avatarSize,
+                player.Name, player.IsYou, player.IsAlive ? 1f : 0.45f, remoteAvatars.Wrap(player.Id));
+
+            ImGui.SetCursorScreenPos(new Vector2(origin.X + textOffset, rowTop + 5f));
 
             var line = player.Name + (player.IsYou ? "（你）" : string.Empty);
-
             if (!string.IsNullOrEmpty(player.Badge)) line += $"  [{player.Badge}]";
-            if (player.Votes is { } votes) line += $"  ← {votes} 票";
+            if (player.Votes is { } votes) line += $"  ({votes} 票)";
             if (player.IsOffline) line += "  (离线)";
-            if (!string.IsNullOrEmpty(player.Sub)) line += $"  — {player.Sub}";
+            if (!string.IsNullOrEmpty(player.Sub)) line += $"  · {player.Sub}";
 
             if (!player.IsAlive) ImGui.TextDisabled(line);
             else if (player.Accent == "good") TextColored(Good, line);
             else if (player.Accent == "bad") TextColored(Warn, line);
-            else ImGui.Text(line);
+            else if (player.Accent == "warn") TextColored(Gold, line);
+            else if (player.IsYou) TextColored(Accent, line);
+            else ImGui.TextUnformatted(line);
         }
 
+        ImGui.SetCursorScreenPos(origin);
+        ImGui.Dummy(new Vector2(0f, view.Players.Count * rowHeight));
         ImGui.EndChild();
     }
+    /// <summary>房间级动作：对局中也要能回到大厅。</summary>
+    private static void DrawSystemActions(IGameClient client, GameView view)
+    {
+        foreach (var action in view.Actions)
+        {
+            if (action.Kind is not ("lobby" or "leave" or "resetsession")) continue;
 
-    private static void DrawActions(GameClient client, GameView view)
+            ImGui.PushID($"sys{action.Kind}");
+            if (Theme.GhostButton(action.Label, new Vector2(120, 0)))
+            {
+                _ = client.SendAsync(Msg.Action, new ActionRequest { Kind = action.Kind, Target = action.Target });
+            }
+
+            ImGui.SameLine(0f, 8f);
+            ImGui.PopID();
+        }
+
+        ImGui.Spacing();
+    }
+
+    private static void DrawActions(IGameClient client, GameView view)
     {
         if (view.Actions.Count == 0) return;
+
+        // 窗口窄就一列，宽就两列；按钮宽度跟着走，不再写死 250
+        var available = ImGui.GetContentRegionAvail().X;
+        var columns = available >= 520f ? 2 : 1;
+        var buttonWidth = MathF.Min(columns == 2 ? (available - 8f) / 2f : available, 400f);
 
         for (var i = 0; i < view.Actions.Count; i++)
         {
             var action = view.Actions[i];
 
-            if (i % 2 == 1) ImGui.SameLine();
+            if (columns == 2 && i % 2 == 1) ImGui.SameLine(0f, 8f);
 
             ImGui.PushID($"action{i}");
             if (!action.Enabled) ImGui.BeginDisabled();
 
-            if (ImGui.Button(action.Label, new Vector2(250, 0)))
+            var clicked = action.Danger
+                ? Theme.DangerButton(action.Label, new Vector2(buttonWidth, 0))
+                : i == 0 ? Theme.PrimaryButton(action.Label, new Vector2(buttonWidth, 0))
+                : Theme.GhostButton(action.Label, new Vector2(buttonWidth, 0));
+
+            if (clicked)
             {
                 _ = client.SendAsync(Msg.Action, new ActionRequest
                 {
@@ -952,21 +1410,21 @@ public sealed class MainWindow : Window
             ImGui.PopID();
         }
 
-        if (view.Actions.Count % 2 == 1) ImGui.Spacing();
+        if (columns == 2 && view.Actions.Count % 2 == 1) ImGui.Spacing();
     }
 
-    private void DrawActionInput(GameClient client, GameView view)
+    private void DrawActionInput(IGameClient client, GameView view)
     {
         if (!view.AcceptsText) return;
 
         ImGui.Spacing();
         ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 96);
 
-        var submit = ImGui.InputTextWithHint("##actiontext", view.TextHint ?? "输入…", ref actionInput, 80,
+        var submit = Ui.InputTextWithHint("##actiontext", view.TextHint ?? "输入…", ref actionInput, 80,
             ImGuiInputTextFlags.EnterReturnsTrue);
 
         ImGui.SameLine();
-        if (ImGui.Button("提交", new Vector2(88, 0))) submit = true;
+        if (Theme.PrimaryButton("提交", new Vector2(88, 0))) submit = true;
 
         if (!submit || string.IsNullOrWhiteSpace(actionInput)) return;
 
@@ -979,10 +1437,10 @@ public sealed class MainWindow : Window
         actionInput = string.Empty;
     }
 
-    private void DrawLog(GameClient client)
+    private void DrawLog(IGameClient client, GameView view)
     {
         ImGui.Spacing();
-        ImGui.Separator();
+        Theme.Divider();
         ImGui.BeginChild("##log", new Vector2(0, 176), true, ImGuiWindowFlags.None);
 
         // 只有「来了新消息」且「本来就在底部」时才跟着滚。
@@ -1004,10 +1462,12 @@ public sealed class MainWindow : Window
                     TextMuted(text);
                     break;
                 case "chat":
-                    // 气泡统一靠左；头像只用名字首字（自定义头像留给登录/选游戏界面）
+                    // 头像按名字对回玩家卡片，才能拿到 id → 远端头像
                     var who = roomEvent.Actor ?? "?";
                     var clock = DateTimeOffset.FromUnixTimeMilliseconds(roomEvent.AtMs).ToLocalTime().ToString("HH:mm");
-                    ChatBubble.Draw(who, roomEvent.Text, clock);
+                    var card = view.Players.FirstOrDefault(p => string.Equals(p.Name, who, StringComparison.Ordinal));
+                    var wrap = card is not null ? remoteAvatars.Wrap(card.Id) : null;
+                    ChatBubble.Draw(who, roomEvent.Text, clock, artwork, wrap, card?.IsYou ?? false);
                     break;
                 default:
                     ImGui.TextDisabled(text);
@@ -1021,15 +1481,17 @@ public sealed class MainWindow : Window
         ImGui.EndChild();
     }
 
-    private void DrawChat(GameClient client)
+    private void DrawChat(IGameClient client)
     {
-        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 96);
+        const float sendWidth = 88f;
+        var chatFieldWidth = MathF.Min(MathF.Max(160f, ImGui.GetContentRegionAvail().X - sendWidth - 12f), 520f);
+        ImGui.SetNextItemWidth(chatFieldWidth);
 
-        var send = ImGui.InputTextWithHint("##chat", "说点什么…", ref chatInput, 140,
+        var send = Ui.InputTextWithHint("##chat", "说点什么…", ref chatInput, 140,
             ImGuiInputTextFlags.EnterReturnsTrue);
 
-        ImGui.SameLine();
-        if (ImGui.Button("发送", new Vector2(88, 0))) send = true;
+        ImGui.SameLine(0f, 8f);
+        if (Theme.PrimaryButton("发送", new Vector2(sendWidth, 0))) send = true;
 
         if (!send || string.IsNullOrWhiteSpace(chatInput)) return;
 
@@ -1041,9 +1503,9 @@ public sealed class MainWindow : Window
 
     private void SaveSettings()
     {
-        plugin.Configuration.ServerUrl = serverUrl.Trim();
-        plugin.Configuration.DisplayName = displayName.Trim();
-        plugin.Configuration.Save();
+        host.Configuration.ServerUrl = serverUrl.Trim();
+        host.Configuration.DisplayName = displayName.Trim();
+        host.Configuration.Save();
     }
 
     private static void TextColored(Vector4 color, string text)
@@ -1052,7 +1514,43 @@ public sealed class MainWindow : Window
         ImGui.TextColored(value, text);
     }
 
-    private static void TextMuted(string text) => TextColored(Muted, text);
+    private static void TextMuted(string text) => Theme.Label(text);
 
-    private static void TextWrapped(string text) => ImGui.TextWrapped(text);
+    private static void TextWrapped(string text)
+    {
+        if (Theme.Glass)
+        {
+            Gw.TextWrapped(text, TextRole.Body);
+            return;
+        }
+
+        ImGui.TextWrapped(text);
+    }
+
+    /// <summary>开关：玻璃下是 Glasswork 的拨动开关，没有玻璃退回复选框。</summary>
+    private static bool Toggle(string label, ref bool value)
+    {
+        if (!Theme.Glass)
+        {
+            return ImGui.Checkbox(label, ref value);
+        }
+
+        ImGui.TextUnformatted(label);
+        ImGui.SameLine();
+        return Gw.Toggle(ref value, "##" + label);
+    }
+
+    /// <summary>整数滑块：Glasswork 只有 float 滑块，这里换算一下。</summary>
+    private static bool SliderInt(string label, ref int value, int min, int max)
+    {
+        if (!Theme.Glass)
+        {
+            return ImGui.SliderInt(label, ref value, min, max);
+        }
+
+        var current = (float)value;
+        var changed = Gw.Slider(ref current, min, max, "##" + label, 1f, "0");
+        value = (int)MathF.Round(current);
+        return changed;
+    }
 }

@@ -1,6 +1,6 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.6.3.0</Version>
+    <Version>0.9.1.0</Version>
     <AssemblyName>PartyGames</AssemblyName>
     <RootNamespace>PartyGames</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -8,6 +8,19 @@
 
   <ItemGroup>
     <ProjectReference Include="..\PartyGames.Protocol\PartyGames.Protocol.csproj" />
+  </ItemGroup>
+
+  <!-- 液化玻璃：Glasswork 的玻璃材质 + Look 主题 -->
+  <ItemGroup>
+    <PackageReference Include="Glasswork" Version="0.1.0-beta.5" />
+    <PackageReference Include="Glasswork.Glass" Version="0.1.0-beta.5" />
+    <PackageReference Include="Glasswork.Backend" Version="0.1.0-beta.5" />
+    <PackageReference Include="Glasswork.Dalamud" Version="0.1.0-beta.5" />
+    <PackageReference Include="System.Drawing.Common" Version="8.0.0" />
+    <Reference Include="TerraFX.Interop.Windows">
+      <HintPath>$(DalamudLibPath)TerraFX.Interop.Windows.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <!-- 默认背景图嵌入 DLL，避免因文件路径问题加载不到 -->

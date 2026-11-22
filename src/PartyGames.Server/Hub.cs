@@ -29,6 +29,9 @@ public sealed class Hub : IHostedService
     }
     private readonly Dictionary<string, Connection> _connections = new();
     private readonly ILogger<Hub> _logger;
+    /// <summary>512 KB 的 base64 上限（约 380 KB 原图），够一张 256px 头像。</summary>
+    private const int MaxAvatarChars = 512 * 1024;
+
     private Timer? _timer;
     private int _tickCount;
 
@@ -259,6 +262,10 @@ public sealed class Hub : IHostedService
                 HandleChat(connection, PgJson.Read<ChatRequest>(envelope.Data));
                 break;
 
+            case Msg.Avatar:
+                HandleAvatar(connection, PgJson.Read<AvatarUploadRequest>(envelope.Data));
+                break;
+
             case Msg.LeaveRoom:
                 LeaveRoom(connection);
                 break;
@@ -487,6 +494,24 @@ public sealed class Hub : IHostedService
                 room.HandleGameAction(player, request);
                 return;
         }
+    }
+
+    /// <summary>Stores our own avatar and lets the room see it. Images are capped so one client can't flood the server.</summary>
+    private void HandleAvatar(Connection connection, AvatarUploadRequest? request)
+    {
+        if (request is null || connection.RoomCode is null) return;
+
+        if (request.ImageBase64.Length > MaxAvatarChars)
+        {
+            _logger.LogInformation("avatar from {Player} rejected: {Size} chars", connection.DisplayName, request.ImageBase64.Length);
+            return;
+        }
+
+        _rooms.TryGetValue(connection.RoomCode, out var room);
+        var player = room?.FindPlayer(connection.PlayerId);
+        if (room is null || player is null) return;
+
+        room.SetAvatar(player, request.ImageBase64);
     }
 
     private void HandleChat(Connection connection, ChatRequest? request)

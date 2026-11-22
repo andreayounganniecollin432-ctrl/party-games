@@ -11,8 +11,8 @@ namespace PartyGames;
 /// </summary>
 internal sealed class Artwork : IDisposable
 {
-    private readonly ITextureProvider textures;
-    private readonly IPluginLog log;
+    private readonly ITextureProvider? textures;
+    private readonly IPluginLog? log;
 
     private ISharedImmediateTexture? background;
     private ISharedImmediateTexture? avatar;
@@ -21,7 +21,7 @@ internal sealed class Artwork : IDisposable
     private DateTime nextTry = DateTime.MinValue;
     private static string _baseDir = string.Empty;
 
-    public Artwork(ITextureProvider textures, IPluginLog log)
+    public Artwork(ITextureProvider? textures, IPluginLog? log)
     {
         this.textures = textures;
         this.log = log;
@@ -63,6 +63,12 @@ internal sealed class Artwork : IDisposable
 
     private ISharedImmediateTexture? TryLoad(string path, string label)
     {
+        // 预览里没有贴图服务：直接用画出来的渐变兜底。
+        if (textures is null)
+        {
+            return null;
+        }
+
         try
         {
             if (string.IsNullOrWhiteSpace(path) && label == "背景")
@@ -79,43 +85,49 @@ internal sealed class Artwork : IDisposable
                         {
                             using var fs = System.IO.File.Create(target);
                             stream.CopyTo(fs);
-                            log.Information("[PartyGames] 已释放默认背景到: " + target);
+                            log?.Information("[PartyGames] 已释放默认背景到: " + target);
                         }
                         else
                         {
-                            log.Warning("[PartyGames] 找不到嵌入资源 default-bg.png");
+                            log?.Warning("[PartyGames] 找不到嵌入资源 default-bg.png");
                         }
                     }
 
                     if (System.IO.File.Exists(target))
                     {
-                        log.Information("[PartyGames] 使用默认背景: " + target);
+                        log?.Information("[PartyGames] 使用默认背景: " + target);
                         return textures.GetFromFile(target);
                     }
                 }
                 catch (Exception ex)
                 {
-                    log.Warning("[PartyGames] 释放/加载默认背景失败: " + ex.Message);
+                    log?.Warning("[PartyGames] 释放/加载默认背景失败: " + ex.Message);
                 }
             }
             if (string.IsNullOrWhiteSpace(path))
             {
-                log.Information($"[PartyGames] {label}路径为空，使用默认样式");
+                log?.Information($"[PartyGames] {label}路径为空，使用默认样式");
                 return null;
             }
+            // 配置里存的是相对路径（images\xxx.png），要以插件目录为基准解析
+            if (!System.IO.Path.IsPathRooted(path))
+            {
+                path = System.IO.Path.Combine(BaseDir, path);
+            }
+
             if (!System.IO.File.Exists(path))
             {
-                log.Warning($"[PartyGames] {label}文件不存在: {path}");
+                log?.Warning($"[PartyGames] {label}文件不存在: {path}");
                 return null;
             }
             var tex = textures.GetFromFile(path);
-            log.Information($"[PartyGames] 已加载{label}: {path}");
+            log?.Information($"[PartyGames] 已加载{label}: {path}");
             return tex;
         }
         catch (Exception ex)
         {
             nextTry = DateTime.UtcNow.AddSeconds(30);
-            log.Warning($"[PartyGames] {label}加载失败: {ex.Message}");
+            log?.Warning($"[PartyGames] {label}加载失败: {ex.Message}");
             return null;
         }
     }
@@ -133,7 +145,7 @@ internal sealed class Artwork : IDisposable
             var wrap = background.GetWrapOrDefault();
             if (wrap is null)
             {
-                log.Warning("[PartyGames] 背景贴图尚未就绪，使用渐变兜底");
+                log?.Warning("[PartyGames] 背景贴图尚未就绪，使用渐变兜底");
                 DrawGradient();
                 return;
             }
