@@ -528,7 +528,9 @@ public sealed class Room
         var ev = new RoomEvent { Kind = kind, Text = text, Actor = actor, AtMs = Now };
 
         _backlog.Add(ev);
-        if (_backlog.Count > BacklogLimit) _backlog.RemoveRange(0, _backlog.Count - BacklogLimit);
+            var cutoff = DateTimeOffset.UtcNow.AddHours(-48).ToUnixTimeMilliseconds();
+            _backlog.RemoveAll(e => e.AtMs < cutoff);
+            if (_backlog.Count > 2000) _backlog.RemoveRange(0, _backlog.Count - 2000);
 
         Broadcast(Envelope.Of(Msg.Event, new EventMessage { Event = ev }));
     }

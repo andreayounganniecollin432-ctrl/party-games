@@ -28,6 +28,7 @@ public sealed class MainWindow : Window
     private string displayName;
     private string joinCode = string.Empty;
     private string chatInput = string.Empty;
+    private bool refocusChat;
     private string actionInput = string.Empty;
     private int maxPlayers;
     private string lastAnnounce = string.Empty;
@@ -237,12 +238,12 @@ public sealed class MainWindow : Window
         Theme.Section("提示");
 
         var sync = host.Configuration.SyncChatToGame;
-        if (Toggle("同步聊天到游戏聊天框（Echo，只有自己看得到）", ref sync))
+        if (Toggle("聊天消息用屏幕提示显示（不占游戏聊天框）", ref sync))
         {
             host.Configuration.SyncChatToGame = sync;
             host.Configuration.Save();
         }
-        Theme.Section("外观（本地图片，可留空）");
+        Theme.Section("外观（头像会上传到服务器，房间内所有人都能看到）");
 
         // 头像：点按钮开 Windows 文件对话框，超过 1000×1000 的直接拒绝
         if (Theme.Glass ? Gw.Button("选择头像图片…", ButtonStyle.Glass, ButtonSize.Small)
@@ -1486,6 +1487,12 @@ public sealed class MainWindow : Window
         const float sendWidth = 88f;
         var chatFieldWidth = MathF.Min(MathF.Max(160f, ImGui.GetContentRegionAvail().X - sendWidth - 12f), 520f);
         ImGui.SetNextItemWidth(chatFieldWidth);
+        if (refocusChat)
+        {
+            ImGui.SetKeyboardFocusHere();
+            refocusChat = false;
+        }
+
 
         var send = Ui.InputTextWithHint("##chat", "说点什么…", ref chatInput, 140,
             ImGuiInputTextFlags.EnterReturnsTrue);
@@ -1497,6 +1504,7 @@ public sealed class MainWindow : Window
 
         _ = client.SendAsync(Msg.Chat, new ChatRequest { Text = chatInput.Trim() });
         chatInput = string.Empty;
+        refocusChat = true;
     }
 
     // -- helpers ----------------------------------------------------------
