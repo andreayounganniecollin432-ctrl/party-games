@@ -17,12 +17,19 @@ internal static class Program
     {
         var url = args.Length > 0 ? args[0] : "ws://127.0.0.1:5199/ws";
 
+        if (args.Length > 1 && args[1] == "probe")
+        {
+            await ProbeBidding(url);
+            return 0;
+        }
+
         try
         {
             await TestDouDizhu(url);
             await TestDouDizhuNoCall(url);
             await TestDouDizhuCallOnly(url);
             await TestDouDizhuAutoBid(url);
+            await TestDouDizhuFields(url);
             await TestXiangqi(url);
             await TestEmptyRoomKeepsHistory(url);
         }
@@ -121,6 +128,138 @@ internal static class Program
         }
     }
 
+    /// <summary>0.6.6 新增的结构化牌桌数据：GameView.Doudizhu / RoomSnapshot.MaxPlayers / GamePlayerCard.IsBot。</summary>
+    private static async Task TestDouDizhuFields(string url)
+    {
+        Console.WriteLine("== 斗地主：0.6.6 新协议字段 ==");
+
+        var peers = await StartDouDizhu(url, new[] { "牌一", "牌二", "牌三" });
+        try
+        {
+            var a = peers[0];
+            var snap = await a.WaitAsync(s => Phase(s) == "playing", "开局", 8000);
+
+            Check(snap.TryGetProperty("maxPlayers", out var max) && max.GetInt32() == 3,
+                $"RoomSnapshot.MaxPlayers = {(snap.TryGetProperty("maxPlayers", out var m) ? m.GetInt32() : -1)}");
+
+            var view = snap.GetProperty("view");
+            if (!view.TryGetProperty("doudizhu", out var table) || table.ValueKind != JsonValueKind.Object)
+            {
+                Check(false, "GameView.Doudizhu 存在（服务端没发牌桌数据）");
+                return;
+            }
+
+            Check(true, "GameView.Doudizhu 存在");
+            Check(table.GetProperty("seats").GetArrayLength() == 3, "牌桌有 3 个座位");
+            Check(table.GetProperty("baseScore").GetInt32() > 0, $"底分 = {table.GetProperty("baseScore").GetInt32()}");
+            Check(table.GetProperty("bottomRevealed").ValueKind == JsonValueKind.False, "叫牌前底牌是盖着的");
+            Check(view.GetProperty("players").EnumerateArray().All(p => p.TryGetProperty("isBot", out _)),
+                "GamePlayerCard.IsBot 字段存在");
+
+            var before = table.GetProperty("seats").EnumerateArray().Sum(s => s.GetProperty("remaining").GetInt32());
+            Check(before == 51, $"发牌后三家共 51 张（实际 {before}）");
+
+            await DriveBidding(peers, 20_000);
+
+            var after = await a.WaitAsync(s =>
+            {
+                var v = s.GetProperty("view");
+                return v.TryGetProperty("doudizhu", out var t) && t.ValueKind == JsonValueKind.Object &&
+                       !string.IsNullOrEmpty(Str(t, "landlordId"));
+            }, "牌桌给出地主", 10_000);
+
+            var board = after.GetProperty("view").GetProperty("doudizhu");
+            var lord = Str(board, "landlordId");
+            Check(lord.Length > 0, $"landlordId = {lord}");
+            Check(board.GetProperty("bottomRevealed").ValueKind == JsonValueKind.True, "底牌已翻开");
+            Check(board.GetProperty("bottomCards").GetArrayLength() == 3, "底牌 3 张");
+            Check(board.GetProperty("multiplier").GetInt32() >= 1, $"倍数 = {board.GetProperty("multiplier").GetInt32()}");
+
+            var seats = board.GetProperty("seats").EnumerateArray().ToList();
+            Check(seats.Count(s => s.GetProperty("isLandlord").GetBoolean()) == 1, "有且只有一个地主");
+
+            var total = seats.Sum(s => s.GetProperty("remaining").GetInt32());
+            Check(total == 54, $"地主拿底牌后三家共 54 张（实际 {total}）");
+
+            // 老插件（0.6.5.8 及以前）出牌走的是文本（"3♠" / "3 3 4 4"），新服务端必须还认这条路
+            var lordPeer = peers.FirstOrDefault(p => p.PlayerId == lord);
+            if (lordPeer?.LastRoom is { } lordRoom &&
+                lordRoom.GetProperty("view").TryGetProperty("privateNote", out var note) &&
+                note.GetString() is { Length: > 0 } hand)
+            {
+                var token = hand.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+                var eventsBefore = a.EventsSnapshot().Count;
+                await lordPeer.SendAsync("action", new { kind = "play", text = token });
+                var played = await WaitEvent(a, "出牌", 6000, eventsBefore);
+                Check(played, $"老式文本出牌仍然可用（试了 {token}）");
+            }
+            else
+            {
+                Check(false, "拿不到地主手牌，没法验证文本出牌");
+            }
+        }
+        catch (TimeoutException ex)
+        {
+            Check(false, ex.Message);
+        }
+        finally
+        {
+            foreach (var peer in peers) await peer.DisposeAsync();
+        }
+    }
+
+    /// <summary>诊断用：把叫牌全过程的服务端文案和事件打出来。</summary>
+    private static async Task ProbeBidding(string url)
+    {
+        var peers = await StartDouDizhu(url, new[] { "甲", "乙", "丙" });
+
+        try
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(25);
+            while (DateTime.UtcNow < deadline)
+            {
+                var moved = false;
+
+                foreach (var peer in peers)
+                {
+                    if (peer.FirstAction() is not { } action) continue;
+
+                    var kind = Str(action, "kind");
+                    Console.WriteLine($"[{peer.Name}] 我发 {kind}；当前副标题：{Subtitle(peer)}");
+                    await peer.SendAsync("action", new { kind });
+                    moved = true;
+                    await Task.Delay(300);
+                }
+
+                if (peers.Any(p => p.AcceptsText()))
+                {
+                    Console.WriteLine("== 进入出牌阶段 ==");
+                    break;
+                }
+
+                if (!moved) await Task.Delay(150);
+            }
+
+            foreach (var peer in peers)
+            {
+                Console.WriteLine($"--- {peer.Name} 副标题：{Subtitle(peer)}");
+                foreach (var line in peer.EventsSnapshot().TakeLast(12)) Console.WriteLine("    " + line);
+            }
+        }
+        finally
+        {
+            foreach (var peer in peers) await peer.DisposeAsync();
+        }
+    }
+
+    private static string Subtitle(Peer peer)
+    {
+        if (peer.LastRoom is not { } room) return "(no room)";
+        return room.TryGetProperty("view", out var view) && view.TryGetProperty("subtitle", out var s)
+            ? s.GetString() ?? string.Empty
+            : "(no subtitle)";
+    }
+
     /// <summary>开一局三人斗地主，返回三个连着的 peer。</summary>
     private static async Task<Peer[]> StartDouDizhu(string url, string[]? names = null)
     {
@@ -180,19 +319,19 @@ internal static class Program
         await a.SendAsync("start", null);
         await a.WaitAsync(s => Phase(s) == "playing", "开局");
 
-        // 叫地主：谁被问到就叫；然后两家都抢 → 3 倍
+        // 叫地主：谁被问到就叫；然后两家都抢 → 0.6.6 起每次抢翻倍，两次 = 4 倍
         var driven = await DriveBidding(new[] { a, b, c }, 20_000);
         Check(driven, "叫牌阶段有人接住了按钮");
 
         var playing = await a.WaitAsync(
-            s => Str(s.GetProperty("view"), "subtitle").Contains("3 倍"), "定地主（3 倍）", 8000);
+            s => Str(s.GetProperty("view"), "subtitle").Contains("4 倍"), "定地主（4 倍）", 8000);
 
         var joined = a.EventsSnapshot().FindAll(t => t.Contains("抢到地主") || t.Contains("叫了地主"));
-        Check(joined.Exists(t => t.Contains("抢到地主（抢 2 次，3 倍）")),
-            "两家都抢 → 3 倍: " + string.Join(" | ", joined));
+        Check(joined.Exists(t => t.Contains("抢到地主（抢 2 次，4 倍）")),
+            "两家都抢 → 4 倍（每次抢翻倍）: " + string.Join(" | ", joined));
 
         var subtitle = Str(playing.GetProperty("view"), "subtitle");
-        Check(subtitle.Contains("3 倍"), $"副标题显示倍数（{subtitle}）");
+        Check(subtitle.Contains("4 倍"), $"副标题显示倍数（{subtitle}）");
 
         Console.WriteLine("== 斗地主：掉线托管 ==");
 
