@@ -2,8 +2,8 @@
   "Author": "Coral",
   "Name": "Coral's Games",
   "InternalName": "PartyGames",
-  "AssemblyVersion": "0.6.5.8",
-  "Description": "跨服多人文字游戏平台。房主建房并分享房间码，3-20 人即可开局。液化玻璃界面，支持单人 + 机器人。",
+  "AssemblyVersion": "0.6.6.0",
+  "Description": "跨服多人文字游戏平台，房主建房并分享房间码，3-20 人即可开局。液化玻璃界面，支持单人 + 机器人。",
   "ApplicableVersion": "any",
   "Tags": [
     "social",
